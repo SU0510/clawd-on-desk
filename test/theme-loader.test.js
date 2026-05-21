@@ -857,6 +857,7 @@ describe("theme-loader capability metadata", () => {
     assert.deepStrictEqual(theme._capabilities, {
       eyeTracking: true,
       miniMode: false,
+      dockWalk: false,
       idleAnimations: true,
       reactions: true,
       workingTiers: true,
@@ -871,6 +872,7 @@ describe("theme-loader capability metadata", () => {
     assert.deepStrictEqual(meta.capabilities, {
       eyeTracking: true,
       miniMode: false,
+      dockWalk: false,
       idleAnimations: true,
       reactions: true,
       workingTiers: true,
@@ -962,7 +964,7 @@ describe("theme-loader fallback + sleepSequence", () => {
           name: "Bad Fallback Source",
           states: {
             ...validThemeJson().states,
-            waking: { fallbackTo: "idle" },
+            idle: { fallbackTo: "working" },
           },
           sleepSequence: { mode: "direct" },
         }),
@@ -1056,7 +1058,7 @@ describe("theme-loader fallback + sleepSequence", () => {
   it("rejects fallbackTo on unsupported source states", () => {
     assert.throws(
       () => themeLoader.loadTheme("badFallbackSource", { strict: true }),
-      /states\.waking\.fallbackTo is only allowed on/
+      /states\.idle\.fallbackTo is only allowed on/
     );
   });
 });

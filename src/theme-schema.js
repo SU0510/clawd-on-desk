@@ -11,6 +11,7 @@ const DEFAULT_TIMINGS = {
   minDisplay: {
     attention: 4000, error: 5000, sweeping: 5500,
     notification: 2500, carrying: 3000, working: 1000, thinking: 1000,
+    happy: 500,
   },
   autoReturn: {
     attention: 4000, error: 5000, sweeping: 300000,
@@ -71,6 +72,12 @@ const VISUAL_FALLBACK_STATES = new Set([
   "sweeping",
   "carrying",
   "sleeping",
+  "happy",
+  "dozing",
+  "collapsing",
+  "yawning",
+  "waking",
+  "juggling",
 ]);
 
 function validateTheme(cfg) {
@@ -321,6 +328,10 @@ function deriveSleepMode(cfg) {
   return (cfg && cfg.sleepSequence && cfg.sleepSequence.mode === "direct") ? "direct" : "full";
 }
 
+function isDockWalkSupported(cfg) {
+  return !!(isPlainObject(cfg && cfg.dockWalk) && cfg.dockWalk.supported);
+}
+
 function buildCapabilities(cfg) {
   return {
     eyeTracking: !!(
@@ -329,6 +340,7 @@ function buildCapabilities(cfg) {
       && hasNonEmptyArray(cfg.eyeTracking.states)
     ),
     miniMode: isMiniSupported(cfg),
+    dockWalk: isDockWalkSupported(cfg),
     idleAnimations: hasNonEmptyArray(cfg && cfg.idleAnimations),
     reactions: hasReactionBindings(cfg && cfg.reactions),
     workingTiers: hasNonEmptyArray(cfg && cfg.workingTiers),
@@ -590,6 +602,13 @@ function mergeDefaults(raw, themeId, isBuiltin) {
 
   theme.sleepSequence = { mode: deriveSleepMode(raw) };
 
+  // dockWalk
+  if (raw.dockWalk && raw.dockWalk.supported) {
+    theme.dockWalk = { supported: true };
+  } else {
+    theme.dockWalk = { supported: false };
+  }
+
   // miniMode
   if (raw.miniMode) {
     theme.miniMode = {
@@ -716,6 +735,7 @@ module.exports = {
   supportsIdleTracking,
   deriveIdleMode,
   deriveSleepMode,
+  isDockWalkSupported,
   buildCapabilities,
   collectRequiredAssetFiles,
   deepMergeObject,

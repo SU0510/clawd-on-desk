@@ -48,6 +48,23 @@ module.exports = function initMenu(ctx) {
     };
   }
 
+  function buildDockWalkMenuItem() {
+    const caps = typeof ctx.getActiveThemeCapabilities === "function"
+      ? ctx.getActiveThemeCapabilities()
+      : null;
+    const supported = caps && caps.dockWalk;
+    const isDocked = typeof ctx.isDockWalkActive === "function" && ctx.isDockWalkActive();
+    const isDetecting = typeof ctx.isDockWalkDetecting === "function" && ctx.isDockWalkDetecting();
+
+    if (!supported && !isDocked) return null;
+
+    return {
+      label: isDocked ? t("exitDockWalk") : t("dockWalk"),
+      enabled: !isDetecting && (isDocked || supported),
+      click: () => isDocked ? ctx.exitDockWalk() : ctx.enterDockWalk(),
+    };
+  }
+
   function buildBringToPrimaryDisplayMenuItem() {
     return {
       label: t("bringPetToPrimaryDisplay"),
@@ -105,15 +122,6 @@ module.exports = function initMenu(ctx) {
       },
       buildMiniModeMenuItem(),
       { type: "separator" },
-      // Quick-toggle noise controls. Other settings (language, theme, bubble
-      // follow, start-with-Claude, updates, etc.) were moved out of the tray
-      // and now live only in the Settings panel / About tab.
-      {
-        label: t("hideBubbles"),
-        type: "checkbox",
-        checked: ctx.hideBubbles,
-        click: (menuItem) => { ctx.hideBubbles = menuItem.checked; },
-      },
       {
         label: t("soundEffects"),
         type: "checkbox",
@@ -157,12 +165,6 @@ module.exports = function initMenu(ctx) {
       {
         label: t("settings"),
         click: () => ctx.openSettingsWindow(),
-      },
-      {
-        label: t("openDashboard"),
-        click: () => {
-          if (typeof ctx.openDashboard === "function") ctx.openDashboard();
-        },
       },
       buildBringToPrimaryDisplayMenuItem(),
       { type: "separator" },
@@ -295,7 +297,7 @@ module.exports = function initMenu(ctx) {
     const y = Math.round(wa.y + (wa.height - size.height) / 2);
     ctx.applyPetWindowBounds({ x, y, width: size.width, height: size.height });
     ctx.syncHitWin();
-    ctx.repositionBubbles();
+    
     ctx.flushRuntimeStateToPrefs();
   }
 
@@ -304,19 +306,20 @@ module.exports = function initMenu(ctx) {
       {
         ...buildMiniModeMenuItem(),
       },
+    ];
+    // Dock-walk menu item (only for themes that support it)
+    const dockWalkItem = buildDockWalkMenuItem();
+    if (dockWalkItem) {
+      template.push(dockWalkItem);
+    }
+    template.push(
       { type: "separator" },
       {
         label: ctx.doNotDisturb ? t("wake") : t("sleep"),
         click: () => ctx.doNotDisturb ? ctx.disableDoNotDisturb() : ctx.enableDoNotDisturb(),
       },
       { type: "separator" },
-      {
-        label: t("openDashboard"),
-        click: () => {
-          if (typeof ctx.openDashboard === "function") ctx.openDashboard();
-        },
-      },
-    ];
+    );
     // sendToDisplay is a multi-display-only tail entry. Push dynamically
     // (rather than visible:false) — Electron leaves a phantom gap for
     // hidden separators otherwise.
@@ -387,7 +390,7 @@ module.exports = function initMenu(ctx) {
     }
     if (mode !== "preview") {
       ctx.syncHitWin();
-      ctx.repositionBubbles();
+      
       if (persist) ctx.flushRuntimeStateToPrefs();
     }
   }

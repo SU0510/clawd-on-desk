@@ -1,7 +1,7 @@
 "use strict";
 
 function requiredDependency(value, name) {
-  if (!value) throw new Error(`registerPetInteractionIpc requires ${name}`);
+  if (value === undefined || value === null) throw new Error(`registerPetInteractionIpc requires ${name}`);
   return value;
 }
 
@@ -32,22 +32,14 @@ function registerPetInteractionIpc(options = {}) {
   const applyPetWindowBounds = requiredDependency(options.applyPetWindowBounds, "applyPetWindowBounds");
   const reassertWinTopmost = requiredDependency(options.reassertWinTopmost, "reassertWinTopmost");
   const scheduleHwndRecovery = requiredDependency(options.scheduleHwndRecovery, "scheduleHwndRecovery");
-  const repositionFloatingBubbles = requiredDependency(
-    options.repositionFloatingBubbles,
-    "repositionFloatingBubbles"
-  );
   const exitMiniMode = requiredDependency(options.exitMiniMode, "exitMiniMode");
-  const getFocusableLocalHudSessionIds = requiredDependency(
-    options.getFocusableLocalHudSessionIds,
-    "getFocusableLocalHudSessionIds"
-  );
-  const focusLog = requiredDependency(options.focusLog, "focusLog");
-  const showDashboard = requiredDependency(options.showDashboard, "showDashboard");
-  const focusSession = requiredDependency(options.focusSession, "focusSession");
   const setLowPowerIdlePaused = requiredDependency(
     options.setLowPowerIdlePaused,
     "setLowPowerIdlePaused"
   );
+  const checkCeilingSnap = options.checkCeilingSnap || (() => {});
+  const checkCeilingDragExit = options.checkCeilingDragExit || (() => false);
+const checkDockDragExit = options.checkDockDragExit || (() => false);
   const disposers = [];
 
   function on(channel, listener) {
@@ -88,46 +80,36 @@ function registerPetInteractionIpc(options = {}) {
   });
 
   on("drag-end", () => {
-    try {
-      if (!isMiniMode() && !isMiniTransitioning()) {
-        checkMiniModeSnap();
-        if (isMiniMode() || isMiniTransitioning()) return;
-        if (hasPetWindow()) {
-          const virtualBounds = getPetWindowBounds();
-          const size = getKeepSizeAcrossDisplays()
-            ? { width: virtualBounds.width, height: virtualBounds.height }
-            : getCurrentPixelSize();
-          const clamped = computeDragEndBounds(virtualBounds, size);
-          if (clamped) applyPetWindowBounds(clamped);
-          reassertWinTopmost();
-          scheduleHwndRecovery();
-          syncHitWin();
-          repositionFloatingBubbles();
-        }
+  try {
+    if (!isMiniMode() && !isMiniTransitioning()) {
+      // Check ceiling walk snap (top edge)
+      if (!checkCeilingDragExit()) {
+        checkCeilingSnap();
       }
-    } finally {
-      setDragLocked(false);
-      clearDragSnapshot();
+      // Check dock-walk drag exit (pulled away from target window edge)
+      checkDockDragExit();
+      checkMiniModeSnap();
+      if (isMiniMode() || isMiniTransitioning()) return;
+      if (hasPetWindow()) {
+        const virtualBounds = getPetWindowBounds();
+        const size = getKeepSizeAcrossDisplays()
+          ? { width: virtualBounds.width, height: virtualBounds.height }
+          : getCurrentPixelSize();
+        const clamped = computeDragEndBounds(virtualBounds, size);
+        if (clamped) applyPetWindowBounds(clamped);
+        reassertWinTopmost();
+        scheduleHwndRecovery();
+        syncHitWin();
+      }
     }
-  });
+  } finally {
+    setDragLocked(false);
+    clearDragSnapshot();
+  }
+});
 
   on("exit-mini-mode", () => {
     if (isMiniMode()) exitMiniMode();
-  });
-
-  on("focus-terminal", () => {
-    const focusableIds = getFocusableLocalHudSessionIds();
-    focusLog(`focus request source=pet-body sid=- focusableCount=${focusableIds.length}`);
-    if (focusableIds.length > 1) {
-      focusLog(`focus result branch=none reason=multi-session-open-dashboard count=${focusableIds.length}`);
-      showDashboard();
-      return;
-    }
-    if (focusableIds.length === 1) {
-      focusSession(focusableIds[0], { requestSource: "pet-body" });
-      return;
-    }
-    focusLog("focus result branch=none reason=no-focusable-session source=pet-body");
   });
 
   return {

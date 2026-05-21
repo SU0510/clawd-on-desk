@@ -895,8 +895,8 @@ function swapToFile(file, state, useObjectChannel, options = {}) {
 window.electronAPI.onStateChange((state, svg) => {
   // Main process state change → cancel any active click reaction
   cancelReaction();
-  // Track the latest state name so the Kimi permission pulse can re-trigger
-  // swapToFile() with the matching state for eye-tracking decisions.
+  // Track the latest state name
+  
   currentState = state;
   noteLowPowerActivity();
   if (!shouldUseCloudlingPointerBridge(state, svg)) {
@@ -904,7 +904,6 @@ window.electronAPI.onStateChange((state, svg) => {
   }
 
   // Dedup only when the same file resolves to the same asset URL. Imported
-  // Codex Pet themes reuse filenames, so filename-only dedup can keep showing
   // the previous theme until a drag/click forces a different animation.
   const desiredObjectChannel = needsObjectChannel(state, svg);
   const desiredAssetUrl = getAssetUrl(svg);
@@ -949,11 +948,6 @@ window.electronAPI.onStateChange((state, svg) => {
 
 // Kimi CLI permission hold: re-trigger the current animation so it loops
 // while the user is reviewing the permission prompt.
-window.electronAPI.onKimiPermissionPulse(() => {
-  if (clawdEl && clawdEl.isConnected && currentDisplayedSvg) {
-    swapToFile(currentDisplayedSvg, currentState);
-  }
-});
 
 // --- Eye tracking (idle state only) ---
 // Two systems coexist:
@@ -1316,3 +1310,44 @@ if (!currentDisplayedSvg && _idleFollowSvg) {
   currentIdleSvg = _idleFollowSvg;
   swapToFile(_idleFollowSvg, "idle");
 }
+
+// --- Ceiling walk mode (flip pet upside-down when on ceiling) ---
+let ceilingModeActive = false;
+window.electronAPI.onCeilingModeChange((enabled, flipY) => {
+  ceilingModeActive = enabled;
+  if (enabled && flipY) {
+    container.style.transform = "scaleY(-1)";
+    container.style.transformOrigin = "center center";
+  } else {
+    container.style.transform = "";
+    container.style.transformOrigin = "";
+  }
+});
+
+// --- Dock-walk mode (walk along external window top edge) ---
+let dockWalkActive = false;
+let dockWalkDirection = 1; // 1 = right, -1 = left
+window.electronAPI.onDockModeChange((enabled) => {
+  dockWalkActive = enabled;
+  if (!enabled) {
+    // Clear any dock-walk transforms
+    dockWalkDirection = 1;
+    if (!ceilingModeActive) {
+      container.style.transform = "";
+      container.style.transformOrigin = "";
+    }
+  }
+});
+window.electronAPI.onDockWalkDirection((direction) => {
+  dockWalkDirection = direction;
+  if (dockWalkActive) {
+    // Flip horizontally when walking left (GIF can't play in reverse)
+    if (direction === -1) {
+      container.style.transform = "scaleX(-1)";
+      container.style.transformOrigin = "center center";
+    } else {
+      container.style.transform = "";
+      container.style.transformOrigin = "";
+    }
+  }
+});

@@ -177,6 +177,7 @@ function createThemeRuntime(options = {}) {
     ) {
       preservedVirtualBounds = null;
       callMethod(miniRuntime, "exitMiniMode");
+    if (options && typeof options.handleDockWalkThemeSwitch === "function") options.handleDockWalkThemeSwitch();
     }
 
     setActiveTheme(newTheme);

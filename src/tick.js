@@ -29,7 +29,9 @@ const LOW_POWER_MINI_IDLE_TICK_MS = 2000;
 const REACTION_TICK_MS = 500;
 const BACKGROUND_TICK_MS = 750;
 const RECENT_MOUSE_MS = 2000;
-const POINTER_BRIDGE_STATES = new Set(["idle", "mini-idle", "mini-peek"]);
+const HAPPY_PROXIMITY_PX = 120; // pixels from pet center to trigger happy state
+const HAPPY_STATES = new Set(["idle", "happy"]); // states where happy proximity is checked
+const POINTER_BRIDGE_STATES = new Set(["idle", "mini-idle", "mini-peek", "happy"]);
 const LOW_POWER_PAUSE_STATES = new Set(["idle", "mini-idle", "dozing"]);
 const POINTER_BRIDGE_EPSILON = 0.001;
 
@@ -181,7 +183,7 @@ function runMainTickOnce() {
 
     // Skip expensive native IPC calls (getCursorScreenPoint, getBounds) when
     // cursor tracking is not needed — saves ~20 calls/sec to the OS layer.
-    const needsCursorPoll = idleNow || miniIdleNow || ctx.miniMode;
+    const happyNow = ctx.currentState === "happy" && !ctx.idlePaused; const needsCursorPoll = idleNow || miniIdleNow || ctx.miniMode || happyNow;
     if (!needsCursorPoll) return nextDelay();
 
     const cursor = screen.getCursorScreenPoint();
@@ -208,6 +210,12 @@ function runMainTickOnce() {
                 && cursor.y >= hit.top  && cursor.y <= hit.bottom;
       ctx.mouseOverPet = over;
     }
+
+    // ── Dock-walk / Pomeranian mouse proximity check ──
+    if (typeof ctx.dockWalkCheckProximity === "function" && ctx.isDockWalkActive && ctx.isDockWalkActive()) {
+      ctx.dockWalkCheckProximity(cursor.x, cursor.y);
+    }
+
 
     // ── Mini mode peek hover ──
     if (ctx.miniMode && !ctx.miniTransitioning && !ctx.dragLocked && !ctx.menuOpen) {
@@ -296,9 +304,11 @@ function runMainTickOnce() {
         }, 250 + pick.duration);
         return nextDelay();
       }
+
+
     }
 
-    const trackEyesNow = (idleNow && ctx.currentSvg === SVG_IDLE_FOLLOW && !isMouseIdle) || miniIdleNow;
+    const trackEyesNow = (idleNow && ctx.currentSvg === SVG_IDLE_FOLLOW && !isMouseIdle) || miniIdleNow || happyNow;
     if (!trackEyesNow) return nextDelay();
     if (shouldSuppressPassiveIpc()) {
       if (ctx.forceEyeResend) ctx.forceEyeResend = false;
