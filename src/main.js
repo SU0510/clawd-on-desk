@@ -11,7 +11,14 @@ const {
 } = require("./settings-size-preview-session");
 const { registerSettingsIpc } = require("./settings-ipc");
 const createSettingsEffectRouter = require("./settings-effect-router");
+const { registerSessionIpc } = require("./session-ipc");
 const { registerPetInteractionIpc } = require("./pet-interaction-ipc");
+const initPermission = require("./permission");
+const { registerPermissionIpc } = initPermission;
+const { createTelegramApprovalSidecar } = require("./telegram-approval-sidecar");
+const telegramApprovalSettings = require("./telegram-approval-settings");
+const initUpdateBubble = require("./update-bubble");
+const { registerUpdateBubbleIpc } = initUpdateBubble;
 const createSettingsAnimationOverridesMain = require("./settings-animation-overrides-main");
 const { registerSettingsAnimationOverridesIpc } = createSettingsAnimationOverridesMain;
 const createShortcutRuntime = require("./shortcut-runtime");
@@ -30,11 +37,18 @@ const createTopmostRuntime = require("./topmost-runtime");
 const { WIN_TOPMOST_LEVEL } = createTopmostRuntime;
 const createThemeFadeSequencer = require("./theme-fade-sequencer");
 const createThemeRuntime = require("./theme-runtime");
+const createAgentRuntimeMain = require("./agent-runtime-main");
 const createFloatingWindowRuntime = require("./floating-window-runtime");
 const createPetWindowRuntime = require("./pet-window-runtime");
 const createCeilingWalk = require("./ceiling-walk");
 const createDockWalk = require("./dock-walk");
 const dockWalkDetect = require("./dock-walk-detect");
+const {
+  getFocusableLocalHudSessionIds: selectFocusableLocalHudSessionIds,
+  getSessionFocusTarget,
+} = require("./session-focus");
+const { focusCodexThreadTarget } = require("./session-focus-handoff");
+const { getAllAgents } = require("../agents/registry");
 
 // ── Autoplay policy: allow sound playback without user gesture ──
 // MUST be set before any BrowserWindow is created (before app.whenReady)
@@ -50,6 +64,7 @@ const THEME_SWITCH_FADE_FALLBACK_MS = 4000;
 
 applyWindowsAppUserModelId(app, process.platform);
 
+
 // ── Windows: AllowSetForegroundWindow via FFI ──
 let _allowSetForeground = null;
 if (isWin) {
@@ -61,6 +76,7 @@ if (isWin) {
     console.warn("Clawd: koffi/AllowSetForegroundWindow not available:", err.message);
   }
 }
+
 
 // ── Window size presets ──
 const SIZES = {
@@ -79,9 +95,29 @@ const SIZES = {
 const prefsModule = require("./prefs");
 const { createSettingsController } = require("./settings-controller");
 const { createTranslator, i18n } = require("./i18n");
+const {
+  getBubblePolicy,
+  isAllBubblesHidden,
+} = require("./bubble-policy");
 const loginItemHelpers = require("./login-item");
 const PREFS_PATH = path.join(app.getPath("userData"), "clawd-prefs.json");
 const _initialPrefsLoad = prefsModule.load(PREFS_PATH);
+
+// Lazy helpers — these run inside the action `effect` callbacks at click time,
+// long after server.js / hooks/install.js are loaded. Wrapping them in closures
+// avoids a chicken-and-egg require order at module load.
+function _installAutoStartHook() {
+  const { registerHooks } = require("../hooks/install.js");
+  registerHooks({ silent: true, autoStart: true, port: getHookServerPort() });
+}
+function _uninstallAutoStartHook() {
+  const { unregisterAutoStart } = require("../hooks/install.js");
+  unregisterAutoStart();
+}
+async function _uninstallClaudeHooksNow() {
+  const { unregisterHooksAsync } = require("../hooks/install.js");
+  await unregisterHooksAsync();
+}
 
 // Cross-platform "open at login" writer used by both the openAtLogin effect
 // and the startup hydration helper. Throws on failure so the action layer can
@@ -114,7 +150,7 @@ function _readSystemOpenAtLogin() {
 function _deferredResizePet(sizeKey) {
   // Bound to _menu.resizeWindow after menu module is created below. Settings
   // panel's size slider commands route through here so they get the same
- 
+  // window resize + hitWin sync + bubble reposition as the context menu.
   if (_menu && typeof _menu.resizeWindow === "function") {
     _menu.resizeWindow(sizeKey);
   }
@@ -138,6 +174,13 @@ function _restartClawdNow() {
 
 let shortcutRuntime = null;
 let themeRuntime = null;
+let agentRuntime = null;
+let floatingWindowRuntime = null;
+let codexPetMain = null;
+let telegramApprovalSidecar = null;
+let telegramApprovalSyncPromise = Promise.resolve();
+let telegramApprovalConfigSignature = "";
+let telegramApprovalTokenRevision = 0;
 const shortcutHandlers = {
   togglePet: () => togglePetVisibility(),
 };
@@ -145,9 +188,37 @@ const _settingsController = createSettingsController({
   prefsPath: PREFS_PATH,
   loadResult: _initialPrefsLoad,
   injectedDeps: {
+    installAutoStart: _installAutoStartHook,
+    uninstallAutoStart: _uninstallAutoStartHook,
+    syncClaudeHooksNow: () => {
+      const { registerHooksAsync } = require("../hooks/install.js");
+      return registerHooksAsync({ silent: true, autoStart: autoStartWithClaude, port: getHookServerPort() });
+    },
+    uninstallClaudeHooksNow: _uninstallClaudeHooksNow,
+    startClaudeSettingsWatcher: () => _server.startClaudeSettingsWatcher(),
+    stopClaudeSettingsWatcher: () => _server.stopClaudeSettingsWatcher(),
     setOpenAtLogin: _writeSystemOpenAtLogin,
+    startMonitorForAgent: (id) => agentRuntime && agentRuntime.startMonitorForAgent(id),
+    stopMonitorForAgent: (id) => agentRuntime && agentRuntime.stopMonitorForAgent(id),
+    syncIntegrationForAgent: (id) => agentRuntime ? agentRuntime.syncIntegrationForAgent(id) : false,
+    repairIntegrationForAgent: (id, options) =>
+      agentRuntime ? agentRuntime.repairIntegrationForAgent(id, options) : false,
+    stopIntegrationForAgent: (id) => agentRuntime ? agentRuntime.stopIntegrationForAgent(id) : false,
+    repairLocalServer: () => _server && typeof _server.repairRuntimeStatus === "function"
+      ? _server.repairRuntimeStatus()
+      : false,
     restartClawd: _restartClawdNow,
+    clearSessionsByAgent: (id) => agentRuntime ? agentRuntime.clearSessionsByAgent(id) : 0,
+    dismissPermissionsByAgent: (id) => agentRuntime ? agentRuntime.dismissPermissionsByAgent(id) : 0,
     resizePet: _deferredResizePet,
+    getActiveSessionAliasKeys: () =>
+      _state && typeof _state.getActiveSessionAliasKeys === "function"
+        ? _state.getActiveSessionAliasKeys()
+        : new Set(),
+    writeTelegramApprovalToken: (token) => writeTelegramApprovalToken(token),
+    getTelegramApprovalStatus: () => getTelegramApprovalStatus(),
+    getTelegramApprovalTokenInfo: () => getTelegramApprovalTokenInfo(),
+    sendTelegramApprovalTest: () => sendTelegramApprovalTest(),
     // Theme runtime is wired after theme-loader.init(); keep these closures
     // lazy so settings actions never capture a pre-init runtime reference.
     activateTheme: (id, variantId, overrideMap) => themeRuntime.activateTheme(id, variantId, overrideMap),
@@ -259,6 +330,7 @@ function safeConsoleError(...args) {
 
 // ── Theme loader ──
 const themeLoader = require("./theme-loader");
+const createCodexPetMain = require("./codex-pet-main");
 themeLoader.init(__dirname, app.getPath("userData"));
 themeRuntime = createThemeRuntime({
   themeLoader,
@@ -279,9 +351,12 @@ themeRuntime = createThemeRuntime({
   flushRuntimeStateToPrefs,
   syncHitStateAfterLoad,
   syncRendererStateAfterLoad,
-  syncHitWin,  startMainTick: () => startMainTick(),
+  syncHitWin,
+  syncSessionHudVisibility: () => syncSessionHudVisibility(),
+  startMainTick: () => startMainTick(),
   bumpAnimationOverridePreviewPosterGeneration,
   rebuildAllMenus: () => rebuildAllMenus(),
+  isManagedTheme: (themeId) => codexPetMain && codexPetMain.isManagedTheme(themeId),
   handleDockWalkThemeSwitch: () => _dockWalk.handleThemeSwitch(),
 });
 themeLoader.bindActiveThemeRuntime(themeRuntime);
@@ -328,6 +403,25 @@ shortcutRuntime = createShortcutRuntime({
   shortcutHandlers,
 });
 
+// The injected window/menu closures below are intentionally lazy. During
+// startup before themeRuntime / win / Settings window / rebuildAllMenus exist,
+// only the sync/summary/merge methods are safe to call.
+codexPetMain = createCodexPetMain({
+  app,
+  BrowserWindow,
+  dialog,
+  fs,
+  getActiveTheme: () => getActiveTheme(),
+  getLang: () => lang,
+  getMainWindow: () => win,
+  getSettingsWindow,
+  path,
+  rebuildAllMenus: () => rebuildAllMenus(),
+  settingsController: _settingsController,
+  shell,
+  themeLoader,
+});
+const REGISTER_PROTOCOL_DEV_ARG = codexPetMain.REGISTER_PROTOCOL_DEV_ARG;
 // Lenient load so a missing/corrupt user-selected theme can't brick boot.
 // If lenient fell back to "clawd" OR the variant fell back to "default",
 // hydrate prefs to match so the store stays truth.
@@ -341,6 +435,31 @@ const _initialVariantMap = _settingsController.get("themeVariant") || {};
 let _requestedVariantId = _initialVariantMap[_requestedThemeId] || "default";
 const _initialThemeOverrides = _settingsController.get("themeOverrides") || {};
 let _requestedThemeOverrides = _initialThemeOverrides[_requestedThemeId] || null;
+let _startupCodexPetSyncSummary = codexPetMain.syncThemes(_requestedThemeId);
+if (codexPetMain.summaryHasActiveOrphan(_startupCodexPetSyncSummary, _requestedThemeId)) {
+  const orphanThemeId = _requestedThemeId;
+  const nextVariantMap = { ...(_settingsController.get("themeVariant") || {}) };
+  const nextOverrides = { ...(_settingsController.get("themeOverrides") || {}) };
+  delete nextVariantMap[orphanThemeId];
+  delete nextOverrides[orphanThemeId];
+
+  _requestedThemeId = "clawd";
+  _requestedVariantId = nextVariantMap[_requestedThemeId] || "default";
+  _requestedThemeOverrides = nextOverrides[_requestedThemeId] || null;
+  const result = _settingsController.hydrate({
+    theme: _requestedThemeId,
+    themeVariant: nextVariantMap,
+    themeOverrides: nextOverrides,
+  });
+  if (result && result.status === "error") {
+    console.warn("Clawd: Codex Pet active theme fallback hydrate failed:", result.message);
+  }
+  _startupCodexPetSyncSummary = codexPetMain.mergeSyncSummaries(
+    _startupCodexPetSyncSummary,
+    codexPetMain.syncThemes(_requestedThemeId)
+  );
+  codexPetMain.setLastSyncSummary(_startupCodexPetSyncSummary);
+}
 const _loadedStartupTheme = themeRuntime.loadInitialTheme(_requestedThemeId, {
   variant: _requestedVariantId,
   overrides: _requestedThemeOverrides,
@@ -389,8 +508,14 @@ const petWindowRuntime = createPetWindowRuntime({
   getNearestWorkArea,
   sendToRenderer,
   keepOutOfTaskbar,
-  repositionAnchoredSurfaces: () => {},
-        buildTrayMenu: () => buildTrayMenu(),
+  repositionSessionHud: () => repositionSessionHud(),
+  repositionAnchoredSurfaces: () => repositionAnchoredFloatingSurfaces(),
+  repositionFloatingBubbles: () => repositionFloatingBubbles(),
+  showFloatingSurfacesForPet: () => floatingWindowRuntime.showFloatingSurfacesForPet(),
+  hideFloatingSurfacesForPet: () => floatingWindowRuntime.hideFloatingSurfacesForPet(),
+  syncSessionHudVisibilityAndBubbles: () => syncSessionHudVisibilityAndBubbles(),
+  syncPermissionShortcuts: () => syncPermissionShortcuts(),
+  buildTrayMenu: () => buildTrayMenu(),
   buildContextMenu: () => buildContextMenu(),
   reapplyMacVisibility: () => reapplyMacVisibility(),
   reassertWinTopmost: () => reassertWinTopmost(),
@@ -399,11 +524,10 @@ const petWindowRuntime = createPetWindowRuntime({
   flushRuntimeStateToPrefs: () => flushRuntimeStateToPrefs(),
   handleMiniDisplayChange: () => _mini.handleDisplayChange(),
   exitMiniMode: () => exitMiniMode(),
- repositionFloatingBubbles: () => {},
- getFocusableLocalHudSessionIds: () => [],
- focusLog: () => {},
- showDashboard: () => {},
- focusSession: () => {},
+  enterDockWalk: () => _dockWalk.enterDetectionMode(),
+  exitDockWalk: () => _dockWalk.exitDockWalk(),
+  isDockWalkActive: () => _dockWalk.isDocked(),
+  isDockWalkDetecting: () => _dockWalk.isDetecting(),
 });
 
 function getObjRect(bounds) {
@@ -473,12 +597,28 @@ let isQuitting = false;
 // directly (writes go through ctx setters → controller.applyUpdate).
 let showTray = _settingsController.get("showTray");
 let showDock = _settingsController.get("showDock");
+let manageClaudeHooksAutomatically = _settingsController.get("manageClaudeHooksAutomatically");
+let autoStartWithClaude = _settingsController.get("autoStartWithClaude");
 let openAtLogin = _settingsController.get("openAtLogin");
+let bubbleFollowPet = _settingsController.get("bubbleFollowPet");
+let sessionHudEnabled = _settingsController.get("sessionHudEnabled");
+let sessionHudShowElapsed = _settingsController.get("sessionHudShowElapsed");
+let sessionHudCleanupDetached = _settingsController.get("sessionHudCleanupDetached");
+let sessionHudAutoHide = _settingsController.get("sessionHudAutoHide");
+let sessionHudPinned = _settingsController.get("sessionHudPinned");
 let soundMuted = _settingsController.get("soundMuted");
 let soundVolume = _settingsController.get("soundVolume");
 let lowPowerIdleMode = _settingsController.get("lowPowerIdleMode");
 let allowEdgePinningCached = _settingsController.get("allowEdgePinning");
 let keepSizeAcrossDisplaysCached = _settingsController.get("keepSizeAcrossDisplays");
+
+function getRuntimeBubblePolicy(kind) {
+  return getBubblePolicy(_settingsController.getSnapshot(), kind);
+}
+
+function getAllBubblesHidden() {
+  return isAllBubblesHidden(_settingsController.getSnapshot());
+}
 
 function togglePetVisibility() { return petWindowRuntime.togglePetVisibility(); }
 function bringPetToPrimaryDisplay() { return petWindowRuntime.bringPetToPrimaryDisplay(); }
@@ -527,9 +667,35 @@ function syncRendererStateAfterLoad({ includeStartupRecovery = true } = {}) {
     return;
   }
 
+  // Theme hot-reload path (override tweak / variant swap): re-render whatever
+  // we were already showing. Going through resolveDisplayState() here flashes
+  // "working/typing" when sessions Map still holds a stale session whose
+  // state hasn't been stale-downgraded yet — currentState already reflects
+  // the user-visible state before reload and stays authoritative.
+  if (!includeStartupRecovery) {
+    const prev = _state.getCurrentState();
+    applyState(prev, getSvgOverride(prev));
+    return;
+  }
+
+  if (sessions.size > 0) {
+    const resolved = resolveDisplayState();
+    applyState(resolved, getSvgOverride(resolved));
+    return;
+  }
+
+  applyState("idle", getSvgOverride("idle"));
+
+  setTimeout(() => {
+    if (sessions.size > 0 || doNotDisturb) return;
+    detectRunningAgentProcesses((found) => {
+      if (found && sessions.size === 0 && !doNotDisturb) {
+        _startStartupRecovery();
+        resetIdleTimer();
+      }
+    });
+  }, 5000);
 }
-
-
 
 // ── Sound playback ──
 let lastSoundTime = 0;
@@ -558,6 +724,19 @@ let lowPowerIdlePaused = false;
 let forceEyeResend = false;
 let forceEyeResendBoostUntil = 0;
 let requestFastTick = () => {};
+let repositionSessionHud = () => {};
+let syncSessionHudVisibility = () => {};
+let broadcastSessionHudSnapshot = () => {};
+let sendSessionHudI18n = () => {};
+let getSessionHudReservedOffset = () => 0;
+let getSessionHudWindow = () => null;
+const themeFadeSequencer = createThemeFadeSequencer({
+  getRenderWindow: () => win,
+  getHitWindow: () => hitWin,
+  fadeOutMs: THEME_SWITCH_FADE_OUT_MS,
+  fadeInMs: THEME_SWITCH_FADE_IN_MS,
+  fallbackMs: THEME_SWITCH_FADE_FALLBACK_MS,
+});
 
 function setForceEyeResend(value) {
   forceEyeResend = !!value;
@@ -588,9 +767,9 @@ const topmostRuntime = createTopmostRuntime({
   isMac,
   getWin: () => win,
   getHitWin: () => hitWin,
-  getPendingPermissions: () => [],
-  getUpdateBubbleWindow: () => null,
-  getSessionHudWindow: () => null,
+  getPendingPermissions: () => pendingPermissions,
+  getUpdateBubbleWindow: () => _updateBubble.getBubbleWindow(),
+  getSessionHudWindow: () => getSessionHudWindow(),
   getContextMenuOwner: () => contextMenuOwner,
   getNearestWorkArea,
   getPetWindowBounds,
@@ -612,11 +791,127 @@ const {
   startTopmostWatchdog,
 } = topmostRuntime;
 
+// ── Permission bubble — delegated to src/permission.js ──
+const {
+  isAgentEnabled: _isAgentEnabled,
+  isAgentPermissionsEnabled: _isAgentPermissionsEnabled,
+  isAgentNotificationHookEnabled: _isAgentNotificationHookEnabled,
+  isCodexPermissionInterceptEnabled: _isCodexPermissionInterceptEnabled,
+} = require("./agent-gate");
+const _permCtx = {
+  get win() { return win; },
+  get lang() { return lang; },
+  get sessions() { return sessions; },
+  get bubbleFollowPet() { return bubbleFollowPet; },
+  get permDebugLog() { return permDebugLog; },
+  get doNotDisturb() { return doNotDisturb; },
+  get hideBubbles() { return getAllBubblesHidden(); },
+  get petHidden() { return petWindowRuntime.isPetHidden(); },
+  getBubblePolicy: getRuntimeBubblePolicy,
+  getPetWindowBounds,
+  getNearestWorkArea,
+  getHitRectScreen,
+  getHudReservedOffset: () => getSessionHudReservedOffset(),
+  guardAlwaysOnTop,
+  reapplyMacVisibility,
+  isAgentPermissionsEnabled: (agentId) =>
+    _isAgentPermissionsEnabled({ agents: _settingsController.get("agents") }, agentId),
+  focusTerminalForSession: (sessionId, options = {}) => {
+    focusDashboardSession(sessionId, {
+      requestSource: options.requestSource || "permission-bubble",
+      fallbackEntry: options.fallbackEntry || getPendingPermissionFocusEntry(sessionId),
+    });
+  },
+  getSettingsSnapshot: () => _settingsController.getSnapshot(),
+  subscribeShortcuts: (cb) => _settingsController.subscribeKey("shortcuts", (_value, snapshot) => {
+    if (typeof cb === "function") cb(snapshot);
+  }),
+  reportShortcutFailure: (actionId, reason) => shortcutRuntime.reportFailure(actionId, reason),
+  clearShortcutFailure: (actionId) => shortcutRuntime.clearFailure(actionId),
+  repositionUpdateBubble: () => repositionUpdateBubble(),
+  getTelegramApprovalClient: () => getTelegramApprovalClient(),
+};
+const _perm = initPermission(_permCtx);
+const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, maybeStartRemoteApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
+const pendingPermissions = _perm.pendingPermissions;
+let permDebugLog = null; // set after app.whenReady()
+let updateDebugLog = null; // set after app.whenReady()
+let sessionDebugLog = null; // set after app.whenReady()
+let focusDebugLog = null; // set after app.whenReady()
+
+function getPendingPermissionFocusEntry(sessionId) {
+  const id = String(sessionId || "");
+  if (!id) return null;
+  const entry = pendingPermissions.find((perm) => perm && perm.sessionId === id && perm.agentId === "codex");
+  if (!entry) return null;
+  const focusEntry = { id, agentId: entry.agentId };
+  if (entry.sourcePid) focusEntry.sourcePid = entry.sourcePid;
+  if (entry.wtHwnd) focusEntry.wtHwnd = entry.wtHwnd;
+  if (entry.cwd) focusEntry.cwd = entry.cwd;
+  if (entry.agentPid) focusEntry.agentPid = entry.agentPid;
+  if (entry.pidChain) focusEntry.pidChain = entry.pidChain;
+  if (entry.host) focusEntry.host = entry.host;
+  if (entry.platform) focusEntry.platform = entry.platform;
+  if (entry.model) focusEntry.model = entry.model;
+  if (entry.codexOriginator) focusEntry.codexOriginator = entry.codexOriginator;
+  if (entry.codexSource) focusEntry.codexSource = entry.codexSource;
+  return focusEntry;
+}
+
+const _updateBubbleCtx = {
+  get win() { return win; },
+  get bubbleFollowPet() { return bubbleFollowPet; },
+  get petHidden() { return petWindowRuntime.isPetHidden(); },
+  getBubblePolicy: getRuntimeBubblePolicy,
+  getPendingPermissions: () => pendingPermissions,
+  getPetWindowBounds,
+  getNearestWorkArea,
+  getUpdateBubbleAnchorRect,
+  getHitRectScreen,
+  getHudReservedOffset: () => getSessionHudReservedOffset(),
+  guardAlwaysOnTop,
+  reapplyMacVisibility,
+};
+const _updateBubble = initUpdateBubble(_updateBubbleCtx);
+const {
+  showUpdateBubble,
+  hideUpdateBubble,
+  repositionUpdateBubble,
+  syncVisibility: syncUpdateBubbleVisibility,
+} = _updateBubble;
+
+floatingWindowRuntime = createFloatingWindowRuntime({
+  getPendingPermissions: () => pendingPermissions,
+  repositionPermissionBubbles: () => repositionBubbles(),
+  repositionUpdateBubble: () => repositionUpdateBubble(),
+  repositionSessionHud: () => repositionSessionHud(),
+  syncSessionHudVisibility: () => syncSessionHudVisibility(),
+  syncUpdateBubbleVisibility: () => syncUpdateBubbleVisibility(),
+  hideUpdateBubble: () => hideUpdateBubble(),
+  keepOutOfTaskbar,
+});
+
+function repositionFloatingBubbles() {
+  return floatingWindowRuntime.repositionFloatingBubbles();
+}
+
+function repositionAnchoredFloatingSurfaces() {
+  return floatingWindowRuntime.repositionAnchoredSurfaces();
+}
+
+function syncSessionHudVisibilityAndBubbles() {
+  return floatingWindowRuntime.syncSessionHudVisibilityAndBubbles();
+}
+
 // ── State machine — delegated to src/state.js ──
+let showDashboard = () => {};
+let broadcastDashboardSessionSnapshot = () => {};
+let sendDashboardI18n = () => {};
+
 const _stateCtx = {
   get theme() { return getActiveTheme(); },
-  win,
-  hitWin,
+  get win() { return win; },
+  get hitWin() { return hitWin; },
   get doNotDisturb() { return doNotDisturb; },
   set doNotDisturb(v) { doNotDisturb = v; },
   get miniMode() { return _mini.getMiniMode(); },
@@ -629,22 +924,43 @@ const _stateCtx = {
   get idlePaused() { return idlePaused; },
   set idlePaused(v) { idlePaused = v; },
   get forceEyeResend() { return forceEyeResend; },
-  set forceEyeResend(v) { forceEyeResend = !!v; },
-  get lowPowerIdleMode() { return lowPowerIdleMode; },
-  set lowPowerIdleMode(v) { lowPowerIdleMode = v; },
-  get soundMuted() { return soundMuted; },
-  get soundVolume() { return soundVolume; },
-  get petHidden() { return petWindowRuntime.isPetHidden(); },
+  set forceEyeResend(v) { setForceEyeResend(v); },
+  get mouseStillSince() { return _tick ? _tick._mouseStillSince : Date.now(); },
+  get pendingPermissions() { return pendingPermissions; },
   sendToRenderer,
   sendToHitWin,
   syncHitWin,
   playSound,
   t: (key) => t(key),
   focusTerminalWindow: (...args) => focusTerminalWindow(...args),
+  resolvePermissionEntry: (...args) => resolvePermissionEntry(...args),
+  dismissPermissionsForDnd: (...args) => _perm.dismissPermissionsForDnd(...args),
+  showKimiNotifyBubble: (...args) => showKimiNotifyBubble(...args),
+  clearKimiNotifyBubbles: (...args) => clearKimiNotifyBubbles(...args),
+  // state.js needs this to gate startKimiPermissionPoll symmetrically with
+  // shouldSuppressKimiNotifyBubble in permission.js — without it the
+  // permissionsEnabled=false toggle would silently rebuild holds on every
+  // incoming Kimi PermissionRequest.
+  isAgentPermissionsEnabled: (agentId) =>
+    _isAgentPermissionsEnabled({ agents: _settingsController.get("agents") }, agentId),
+  // state.js gates self-issued Notification events (idle / wait-for-input
+  // pings) via this reader. Living in updateSession (not at the HTTP
+  // boundary) keeps the gate consistent for hook / log-poll / plugin paths.
+  isAgentNotificationHookEnabled: (agentId) =>
+    _isAgentNotificationHookEnabled({ agents: _settingsController.get("agents") }, agentId),
   miniPeekIn: () => miniPeekIn(),
   miniPeekOut: () => miniPeekOut(),
   buildContextMenu: () => buildContextMenu(),
   buildTrayMenu: () => buildTrayMenu(),
+  debugLog: (msg) => sessionLog(msg),
+  broadcastSessionSnapshot: (snapshot) => {
+    broadcastDashboardSessionSnapshot(snapshot);
+    broadcastSessionHudSnapshot(snapshot);
+    repositionFloatingBubbles();
+  },
+  // Phase 3b: 读 prefs.themeOverrides 判断某个 oneshot state 是否被用户禁用。
+  // state.js gate 调这个做 early-return。不做白名单校验——settings-actions
+  // 负责写入合法性，这里只读。
   isOneshotDisabled: (stateKey) => {
     const theme = getActiveTheme();
     const themeId = theme && theme._id;
@@ -655,20 +971,60 @@ const _stateCtx = {
     const entry = (stateMap && stateMap[stateKey]) || (themeMap && themeMap[stateKey]);
     return !!(entry && entry.disabled === true);
   },
-  hasAnyEnabledAgent: () => false,
+  get sessionHudCleanupDetached() { return sessionHudCleanupDetached; },
+  getSessionAliases: () => _settingsController.get("sessionAliases"),
+  hasAnyEnabledAgent: () => {
+    // `get("agents")` returns the live reference (no clone) — we're only
+    // reading. Missing agents field falls back to "assume enabled" (the
+    // legacy default-true contract for unconfigured installs); but an
+    // explicit empty object means every agent was cleared, so return
+    // false. Without that distinction, a user who wiped the field would
+    // still trigger startup-recovery process scans.
+    const agents = _settingsController.get("agents");
+    if (!agents || typeof agents !== "object") return true;
+    const probe = { agents };
+    for (const id of Object.keys(agents)) {
+      if (_isAgentEnabled(probe, id)) return true;
+    }
+    return false;
+  },
 };
 const _state = require("./state")(_stateCtx);
 const { setState, applyState, updateSession, resolveDisplayState, getSvgOverride,
- enableDoNotDisturb, disableDoNotDisturb,
- startWakePoll, stopWakePoll } = _state;
+        enableDoNotDisturb, disableDoNotDisturb, startStaleCleanup, stopStaleCleanup,
+        startWakePoll, stopWakePoll, detectRunningAgentProcesses,
+        startStartupRecovery: _startStartupRecovery } = _state;
+const sessions = _state.sessions;
 
 // ── Hit-test: SVG bounding box → screen coordinates ──
 function getHitRectScreen(bounds) { return petWindowRuntime.getHitRectScreen(bounds); }
+function getUpdateBubbleAnchorRect(bounds) { return petWindowRuntime.getUpdateBubbleAnchorRect(bounds); }
+function getSessionHudAnchorRect(bounds) { return petWindowRuntime.getSessionHudAnchorRect(bounds); }
 
 // ── Main tick — delegated to src/tick.js ──
 const _tickCtx = {
   get theme() { return getActiveTheme(); },
+  get win() { return win; },
   getPetWindowBounds,
+  get currentState() { return _state.getCurrentState(); },
+  get currentSvg() { return _state.getCurrentSvg(); },
+  get miniMode() { return _mini.getMiniMode(); },
+  get miniTransitioning() { return _mini.getMiniTransitioning(); },
+  get dragLocked() { return petWindowRuntime.isDragLocked(); },
+  get menuOpen() { return menuOpen; },
+  get idlePaused() { return idlePaused; },
+  get lowPowerIdlePaused() { return lowPowerIdlePaused; },
+  get isAnimating() { return _mini.getIsAnimating(); },
+  get miniSleepPeeked() { return _mini.getMiniSleepPeeked(); },
+  set miniSleepPeeked(v) { _mini.setMiniSleepPeeked(v); },
+  get miniPeeked() { return _mini.getMiniPeeked(); },
+  set miniPeeked(v) { _mini.setMiniPeeked(v); },
+  get mouseOverPet() { return mouseOverPet; },
+  set mouseOverPet(v) { mouseOverPet = v; },
+  get forceEyeResend() { return forceEyeResend; },
+  set forceEyeResend(v) { setForceEyeResend(v); },
+  get forceEyeResendBoostUntil() { return forceEyeResendBoostUntil; },
+  get startupRecoveryActive() { return _state.getStartupRecoveryActive(); },
   sendToRenderer,
   sendToHitWin,
   setState,
@@ -688,10 +1044,154 @@ const { startMainTick, resetIdleTimer } = _tick;
 // ── Terminal focus — delegated to src/focus.js ──
 const _focus = require("./focus")({ _allowSetForeground, focusLog });
 const { initFocusHelper, killFocusHelper, focusTerminalWindow, clearMacFocusCooldownTimer } = _focus;
-// ── HTTP server — delegated to src/server.js ──
 
-const _server = require("./server")();
-const { startHttpServer } = _server;
+function getFocusableLocalHudSessionIds() {
+  if (!_state || typeof _state.buildSessionSnapshot !== "function") return [];
+  return selectFocusableLocalHudSessionIds(_state.buildSessionSnapshot());
+}
+
+function focusTerminalSession(session, sessionId, requestSource) {
+  if (!session || !session.sourcePid) return false;
+  focusTerminalWindow({
+    sourcePid: session.sourcePid,
+    wtHwnd: session.wtHwnd,
+    cwd: session.cwd,
+    editor: session.editor,
+    pidChain: session.pidChain,
+    sessionId: String(sessionId),
+    agentId: session.agentId,
+    requestSource,
+  });
+  return true;
+}
+
+function focusDashboardSession(sessionId, options = {}) {
+  if (!sessionId) return;
+  const requestSource = options.requestSource || "dashboard";
+  const id = String(sessionId);
+  const session = sessions.get(id);
+  const fallbackEntry = options.fallbackEntry && typeof options.fallbackEntry === "object"
+    ? options.fallbackEntry
+    : null;
+  if (!session && !fallbackEntry) {
+    focusLog(`focus result branch=none reason=session-not-found source=${requestSource} sid=${id}`);
+    return;
+  }
+
+  const focusEntry = { ...(session || {}), ...(fallbackEntry || {}), id };
+  const focusTarget = getSessionFocusTarget(focusEntry);
+  if (focusTarget.type === "codex-thread" && focusTarget.url) {
+    focusCodexThreadTarget({
+      shell,
+      focusEntry,
+      sessionId: id,
+      requestSource,
+      url: focusTarget.url,
+      focusLog,
+      focusTerminalSession,
+    });
+    return;
+  }
+
+  if (focusTarget.type === "terminal") {
+    focusTerminalSession(focusEntry, id, requestSource);
+    return;
+  }
+
+  if (focusEntry.platform === "webui") {
+    focusLog(`focus result branch=none reason=webui-unfocusable source=${requestSource} sid=${id}`);
+  } else {
+    focusLog(`focus result branch=none reason=no-source-pid source=${requestSource} sid=${id}`);
+  }
+}
+
+function hideDashboardSession(sessionId) {
+  if (!_state || typeof _state.dismissSession !== "function") {
+    return { status: "error", message: "session state is not ready" };
+  }
+  const removed = _state.dismissSession(String(sessionId || ""));
+  return removed
+    ? { status: "ok" }
+    : { status: "not-found" };
+}
+
+const _dashboard = require("./dashboard")({
+  get lang() { return lang; },
+  t: (key) => translate(key),
+  getSessionSnapshot: () => _state.buildSessionSnapshot(),
+  getI18n: () => getDashboardI18nPayload(),
+  getPetWindowBounds,
+  getNearestWorkArea,
+  getSettingsWindow: () => settingsWindowRuntime.getWindow(),
+  iconPath: settingsWindowRuntime.getIconPath(),
+});
+showDashboard = _dashboard.showDashboard;
+broadcastDashboardSessionSnapshot = _dashboard.broadcastSessionSnapshot;
+sendDashboardI18n = _dashboard.sendI18n;
+
+const _sessionHud = require("./session-hud")({
+  get win() { return win; },
+  get petHidden() { return petWindowRuntime.isPetHidden(); },
+  get sessionHudEnabled() { return sessionHudEnabled; },
+  get sessionHudShowElapsed() { return sessionHudShowElapsed; },
+  get sessionHudAutoHide() { return sessionHudAutoHide; },
+  get sessionHudPinned() { return sessionHudPinned; },
+  getMiniMode: () => _mini.getMiniMode(),
+  getMiniTransitioning: () => _mini.getMiniTransitioning(),
+  getSessionSnapshot: () => _state.buildSessionSnapshot(),
+  getI18n: () => getDashboardI18nPayload(),
+  getPetWindowBounds,
+  getHitRectScreen,
+  getSessionHudAnchorRect,
+  getNearestWorkArea,
+  guardAlwaysOnTop,
+  reapplyMacVisibility,
+  onReservedOffsetChange: () => repositionFloatingBubbles(),
+});
+repositionSessionHud = _sessionHud.repositionSessionHud;
+syncSessionHudVisibility = _sessionHud.syncSessionHud;
+broadcastSessionHudSnapshot = _sessionHud.broadcastSessionSnapshot;
+sendSessionHudI18n = _sessionHud.sendI18n;
+getSessionHudReservedOffset = _sessionHud.getHudReservedOffset;
+getSessionHudWindow = _sessionHud.getWindow;
+
+agentRuntime = createAgentRuntimeMain({
+  getServer: () => _server,
+  getStateRuntime: () => _state,
+  getPermissionRuntime: () => _perm,
+  isAgentEnabled: (agentId) => _isAgentEnabled(_settingsController.getSnapshot(), agentId),
+  updateSession: (sessionId, state, event, opts) => updateSession(sessionId, state, event, opts),
+  showCodexNotifyBubble: (payload) => showCodexNotifyBubble(payload),
+  clearCodexNotifyBubbles: (...args) => clearCodexNotifyBubbles(...args),
+});
+
+// ── HTTP server — delegated to src/server.js ──
+const _serverCtx = {
+  get manageClaudeHooksAutomatically() { return manageClaudeHooksAutomatically; },
+  get autoStartWithClaude() { return autoStartWithClaude; },
+  get doNotDisturb() { return doNotDisturb; },
+  shouldDropForDnd: () => _state.shouldDropForDnd ? _state.shouldDropForDnd() : doNotDisturb,
+  get hideBubbles() { return getAllBubblesHidden(); },
+  getBubblePolicy: getRuntimeBubblePolicy,
+  get pendingPermissions() { return pendingPermissions; },
+  get PASSTHROUGH_TOOLS() { return PASSTHROUGH_TOOLS; },
+  get STATE_SVGS() { return _state.STATE_SVGS; },
+  get sessions() { return sessions; },
+  isAgentEnabled: (agentId) => _isAgentEnabled({ agents: _settingsController.get("agents") }, agentId),
+  isAgentPermissionsEnabled: (agentId) => _isAgentPermissionsEnabled({ agents: _settingsController.get("agents") }, agentId),
+  isCodexPermissionInterceptEnabled: () => _isCodexPermissionInterceptEnabled({ agents: _settingsController.get("agents") }),
+  codexSubagentClassifier: agentRuntime.getCodexSubagentClassifier(),
+  setState,
+  updateSession: agentRuntime.updateSessionFromServer,
+  resolvePermissionEntry,
+  sendPermissionResponse,
+  showPermissionBubble,
+  maybeStartRemoteApproval,
+  replyOpencodePermission,
+  permLog,
+};
+const _server = require("./server")(_serverCtx);
+const { startHttpServer, getHookServerPort } = _server;
 
 function updateLog(msg) {
   if (!updateDebugLog) return;
@@ -699,21 +1199,271 @@ function updateLog(msg) {
   rotatedAppend(updateDebugLog, `[${new Date().toISOString()}] ${msg}\n`);
 }
 
+function sessionLog(msg) {
+  if (!sessionDebugLog) return;
+  const { rotatedAppend } = require("./log-rotate");
+  rotatedAppend(sessionDebugLog, `[${new Date().toISOString()}] ${msg}\n`);
+}
+
 function focusLog(msg) {
   if (!focusDebugLog) return;
   const { rotatedAppend } = require("./log-rotate");
   rotatedAppend(focusDebugLog, `[${new Date().toISOString()}] ${msg}\n`);
 }
+
+function getTelegramApprovalClient() {
+  if (!telegramApprovalSidecar || typeof telegramApprovalSidecar.getClient !== "function") return null;
+  return telegramApprovalSidecar.getClient();
+}
+
+function telegramApprovalLog(level, message, meta = {}) {
+  const parts = [`telegram approval sidecar ${level}: ${message}`];
+  if (meta && meta.text) parts.push(String(meta.text).trim());
+  if (meta && meta.error) parts.push(String(meta.error).trim());
+  permLog(parts.filter(Boolean).join(" | "));
+}
+
+function getTelegramApprovalPrefs() {
+  return telegramApprovalSettings.normalizeTelegramApproval(_settingsController.get("tgApproval"));
+}
+
+// Canonical paths only — no env-var override. The Settings "Save token" button,
+// the sidecar's bridge TOML, and tokenStatus all share this single location so
+// a malicious or accidental CLAWD_TG_BOT_TOKEN_FILE / CLAWD_BRIDGE_CONFIG can't
+// redirect the writer to an attacker-controlled path or split the writer/reader
+// view of where the token lives.
+function getTelegramApprovalPaths() {
+  const userDataDir = app.getPath("userData");
+  return {
+    userDataDir,
+    configPath: telegramApprovalSettings.defaultBridgeConfigPath(userDataDir),
+    tokenEnvFilePath: telegramApprovalSettings.defaultTokenEnvFilePath(userDataDir),
+  };
+}
+
+function getTelegramApprovalTokenStatus() {
+  const paths = getTelegramApprovalPaths();
+  return telegramApprovalSettings.tokenStatus({
+    fs,
+    filePath: paths.tokenEnvFilePath,
+  });
+}
+
+function getTelegramApprovalTokenInfo() {
+  const paths = getTelegramApprovalPaths();
+  const status = telegramApprovalSettings.tokenStatus({
+    fs,
+    filePath: paths.tokenEnvFilePath,
+  });
+  if (!status.tokenStored) return { configured: false, masked: "" };
+  return {
+    configured: true,
+    masked: telegramApprovalSettings.readMaskedBotToken({
+      fs,
+      filePath: paths.tokenEnvFilePath,
+    }),
+  };
+}
+
+function buildTelegramApprovalSignature(config, paths, tokenStatus) {
+  return JSON.stringify({
+    enabled: config.enabled === true,
+    allowedTgUserId: config.allowedTgUserId,
+    targetSessionKey: config.targetSessionKey,
+    configPath: paths.configPath,
+    tokenEnvFilePath: paths.tokenEnvFilePath,
+    tokenStored: tokenStatus.tokenStored === true,
+    tokenFileMtimeMs: tokenStatus.tokenFileMtimeMs || 0,
+    tokenRevision: telegramApprovalTokenRevision,
+  });
+}
+
+function getTelegramApprovalStatus() {
+  const config = getTelegramApprovalPrefs();
+  const token = getTelegramApprovalTokenStatus();
+  const ready = telegramApprovalSettings.readiness(config, token);
+  const sidecarStatus = telegramApprovalSidecar && typeof telegramApprovalSidecar.getStatus === "function"
+    ? telegramApprovalSidecar.getStatus()
+    : { status: "stopped" };
+  return {
+    ...sidecarStatus,
+    enabled: config.enabled === true,
+    configured: ready.ready === true,
+    reason: ready.reason || "",
+    message: sidecarStatus.message || ready.message || "",
+    tokenStored: token.tokenStored === true,
+  };
+}
+
+function writeTelegramApprovalToken(token) {
+  const paths = getTelegramApprovalPaths();
+  const result = telegramApprovalSettings.writeTokenEnvFile({
+    fs,
+    path,
+    filePath: paths.tokenEnvFilePath,
+    token,
+    platform: process.platform,
+  });
+  if (result && result.status === "ok") {
+    telegramApprovalTokenRevision += 1;
+    queueTelegramApprovalSidecarSync("token");
+  }
+  return result;
+}
+
+async function startTelegramApprovalSidecar() {
+  const config = getTelegramApprovalPrefs();
+  const paths = getTelegramApprovalPaths();
+  const token = getTelegramApprovalTokenStatus();
+  const ready = telegramApprovalSettings.readiness(config, token);
+  if (!ready.ready) {
+    if (ready.reason !== "disabled") {
+      telegramApprovalLog("info", ready.reason || "not configured", {
+        error: ready.message || "",
+      });
+    }
+    return false;
+  }
+  const configWrite = telegramApprovalSettings.writeBridgeConfigFile({
+    fs,
+    path,
+    filePath: paths.configPath,
+    config,
+  });
+  if (!configWrite || configWrite.status !== "ok") {
+    telegramApprovalLog("warn", "config write failed", {
+      error: configWrite && configWrite.message,
+    });
+    return false;
+  }
+  const signature = buildTelegramApprovalSignature(config, paths, token);
+  if (telegramApprovalSidecar && telegramApprovalConfigSignature === signature) {
+    const sidecar = telegramApprovalSidecar;
+    if (typeof sidecar.isRunning !== "function" || !sidecar.isRunning()) {
+      try {
+        await sidecar.start();
+        if (telegramApprovalSidecar === sidecar) telegramApprovalLog("info", "running");
+      } catch (err) {
+        telegramApprovalLog("warn", "start failed", {
+          error: err && err.message ? err.message : String(err),
+        });
+        return false;
+      }
+    }
+    return telegramApprovalSidecar === sidecar;
+  }
+  if (telegramApprovalSidecar) await stopTelegramApprovalSidecar();
+  // The bot token only ever lives at userData/telegram-approval.env on disk.
+  // The sidecar reads it from there directly — Clawd's main process must never
+  // pipe a token value through process.env or child env, so there is no
+  // botToken option here and no CLAWD_TG_BOT_TOKEN read from process.env.
+  telegramApprovalSidecar = createTelegramApprovalSidecar({
+    baseEnv: process.env,
+    env: process.env,
+    userDataDir: paths.userDataDir,
+    resourcesPath: process.resourcesPath,
+    isPackaged: app.isPackaged,
+    configPath: paths.configPath,
+    tokenEnvFilePath: paths.tokenEnvFilePath,
+    redactionSecrets: telegramApprovalSettings.redactionSecretsForTelegramApproval(config),
+    log: telegramApprovalLog,
+  });
+  telegramApprovalConfigSignature = signature;
+  const sidecar = telegramApprovalSidecar;
+  try {
+    await sidecar.start();
+    if (telegramApprovalSidecar === sidecar) {
+      telegramApprovalLog("info", "running");
+      return true;
+    }
+  } catch (err) {
+    telegramApprovalLog("warn", "start failed", {
+      error: err && err.message ? err.message : String(err),
+    });
+  }
+  return false;
+}
+
+function stopTelegramApprovalSidecar() {
+  const sidecar = telegramApprovalSidecar;
+  telegramApprovalSidecar = null;
+  telegramApprovalConfigSignature = "";
+  if (!sidecar || typeof sidecar.stop !== "function") return Promise.resolve();
+  return sidecar.stop().catch((err) => telegramApprovalLog("warn", "stop failed", {
+    error: err && err.message ? err.message : String(err),
+  }));
+}
+
+async function syncTelegramApprovalSidecar(reason = "settings") {
+  const config = getTelegramApprovalPrefs();
+  const paths = getTelegramApprovalPaths();
+  const token = getTelegramApprovalTokenStatus();
+  const ready = telegramApprovalSettings.readiness(config, token);
+  if (!ready.ready) {
+    if (telegramApprovalSidecar) await stopTelegramApprovalSidecar();
+    return false;
+  }
+  const nextSignature = buildTelegramApprovalSignature(config, paths, token);
+  if (telegramApprovalSidecar && telegramApprovalConfigSignature !== nextSignature) {
+    await stopTelegramApprovalSidecar();
+  }
+  const started = await startTelegramApprovalSidecar();
+  if (started) telegramApprovalLog("debug", `sync ${reason}`);
+  return started;
+}
+
+function queueTelegramApprovalSidecarSync(reason) {
+  telegramApprovalSyncPromise = telegramApprovalSyncPromise
+    .catch(() => {})
+    .then(() => syncTelegramApprovalSidecar(reason));
+  return telegramApprovalSyncPromise;
+}
+
+function telegramApprovalUnavailableMessage(status) {
+  if (status && status.message) return status.message;
+  if (status && status.reason === "disabled") return "Telegram approval is disabled";
+  if (status && status.reason === "missing-token") return "Telegram bot token is not configured";
+  if (status && status.reason === "invalid-config") return "Telegram approval config is incomplete";
+  return "Telegram approval sidecar is not running";
+}
+
+async function sendTelegramApprovalTest() {
+  const beforeStatus = getTelegramApprovalStatus();
+  if (beforeStatus.configured !== true) {
+    return { status: "error", message: telegramApprovalUnavailableMessage(beforeStatus) };
+  }
+  await queueTelegramApprovalSidecarSync("test");
+  const client = getTelegramApprovalClient();
+  if (!client || typeof client.requestApproval !== "function") {
+    return { status: "error", message: telegramApprovalUnavailableMessage(getTelegramApprovalStatus()) };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60 * 1000);
+  try {
+    const decision = await client.requestApproval({
+      title: "Clawd Telegram approval test",
+      detail: "This is a settings test message. It is not attached to any agent permission request.",
+    }, { signal: controller.signal });
+    if (decision === "allow" || decision === "deny") {
+      return { status: "ok", decision };
+    }
+    return { status: "error", message: "Telegram test did not receive a button response" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── Menu — delegated to src/menu.js ──
 //
 // Setters that previously assigned to module-level vars now route through
 // `_settingsController.applyUpdate(key, value)`. The mirror cache is updated
 // by the settings-effect-router subscriber after this ctx is built. Side
 // effects that used to live inside setters (e.g.
-// `  get currentSize() { return currentSize; },
-// Menu context
+// `syncPermissionShortcuts()` for hideBubbles) are now reactive and live in
+// the subscriber too.
 const _menuCtx = {
   get win() { return win; },
+  get sessions() { return sessions; },
   get currentSize() { return currentSize; },
   set currentSize(v) { _settingsController.applyUpdate("size", v); },
   get doNotDisturb() { return doNotDisturb; },
@@ -723,11 +1473,22 @@ const _menuCtx = {
   set showTray(v) { _settingsController.applyUpdate("showTray", v); },
   get showDock() { return showDock; },
   set showDock(v) { _settingsController.applyUpdate("showDock", v); },
+  get manageClaudeHooksAutomatically() { return manageClaudeHooksAutomatically; },
+  get autoStartWithClaude() { return autoStartWithClaude; },
+  set autoStartWithClaude(v) { _settingsController.applyUpdate("autoStartWithClaude", v); },
   get openAtLogin() { return openAtLogin; },
   set openAtLogin(v) { _settingsController.applyUpdate("openAtLogin", v); },
+  get bubbleFollowPet() { return bubbleFollowPet; },
+  set bubbleFollowPet(v) { _settingsController.applyUpdate("bubbleFollowPet", v); },
+  get hideBubbles() { return getAllBubblesHidden(); },
+  set hideBubbles(v) { _settingsController.applyCommand("setAllBubblesHidden", { hidden: !!v }).catch((err) => {
+    console.warn("Clawd: setAllBubblesHidden failed:", err && err.message);
+  }); },
   get soundMuted() { return soundMuted; },
   set soundMuted(v) { _settingsController.applyUpdate("soundMuted", v); },
   get soundVolume() { return soundVolume; },
+  get pendingPermissions() { return pendingPermissions; },
+  repositionBubbles: () => repositionFloatingBubbles(),
   get petHidden() { return petWindowRuntime.isPetHidden(); },
   togglePetVisibility: () => togglePetVisibility(),
   bringPetToPrimaryDisplay: () => bringPetToPrimaryDisplay(),
@@ -744,16 +1505,20 @@ const _menuCtx = {
   enableDoNotDisturb: () => enableDoNotDisturb(),
   disableDoNotDisturb: () => disableDoNotDisturb(),
   enterMiniViaMenu: () => enterMiniViaMenu(),
-enterDockWalk: () => _dockWalk.enterDetectionMode(),
-exitDockWalk: () => _dockWalk.exitDockWalk(),
-isDockWalkActive: () => _dockWalk.isDocked(),
-isDockWalkDetecting: () => _dockWalk.isDetecting(),
   exitMiniMode: () => exitMiniMode(),
+  enterDockWalk: () => _dockWalk.enterDetectionMode(),
+  exitDockWalk: () => _dockWalk.exitDockWalk(),
+  isDockWalkActive: () => _dockWalk.isDocked(),
+  isDockWalkDetecting: () => _dockWalk.isDetecting(),
   getMiniMode: () => _mini.getMiniMode(),
   getMiniTransitioning: () => _mini.getMiniTransitioning(),
   miniHandleResize: (sizeKey) => _mini.handleResize(sizeKey),
   checkForUpdates: (...args) => checkForUpdates(...args),
   getUpdateMenuItem: () => getUpdateMenuItem(),
+  openDashboard: () => showDashboard(),
+  // The settings controller is the only writer of persisted prefs. Toggle
+  // setters above route through it; resize/sendToDisplay use
+  // flushRuntimeStateToPrefs to capture window bounds after movement.
   flushRuntimeStateToPrefs,
   settings: _settingsController,
   syncHitWin,
@@ -764,6 +1529,7 @@ isDockWalkDetecting: () => _dockWalk.isDetecting(),
   getPixelSizeFor,
   isProportionalMode,
   PROPORTIONAL_RATIOS,
+  getHookServerPort: () => getHookServerPort(),
   clampToScreenVisual,
   getNearestWorkArea,
   reapplyMacVisibility,
@@ -781,8 +1547,12 @@ const { t, buildContextMenu, buildTrayMenu, rebuildAllMenus, createTray,
 // ── Settings effect router ──
 const SETTINGS_MIRROR_SETTERS = {
   lang: (v) => { lang = v; }, size: (v) => { currentSize = v; }, showTray: (v) => { showTray = v; },
-  showDock: (v) => { showDock = v; },   openAtLogin: (v) => { openAtLogin = v; },
-        soundMuted: (v) => { soundMuted = v; }, soundVolume: (v) => { soundVolume = v; }, lowPowerIdleMode: (v) => { lowPowerIdleMode = v; },
+  showDock: (v) => { showDock = v; }, manageClaudeHooksAutomatically: (v) => { manageClaudeHooksAutomatically = v; },
+  autoStartWithClaude: (v) => { autoStartWithClaude = v; }, openAtLogin: (v) => { openAtLogin = v; },
+  bubbleFollowPet: (v) => { bubbleFollowPet = v; }, sessionHudEnabled: (v) => { sessionHudEnabled = v; },
+  sessionHudShowElapsed: (v) => { sessionHudShowElapsed = v; }, sessionHudCleanupDetached: (v) => { sessionHudCleanupDetached = v; },
+  sessionHudAutoHide: (v) => { sessionHudAutoHide = v; }, sessionHudPinned: (v) => { sessionHudPinned = v; },
+  soundMuted: (v) => { soundMuted = v; }, soundVolume: (v) => { soundVolume = v; }, lowPowerIdleMode: (v) => { lowPowerIdleMode = v; },
   allowEdgePinning: (v) => { allowEdgePinningCached = v; }, keepSizeAcrossDisplays: (v) => { keepSizeAcrossDisplaysCached = v; },
 };
 
@@ -791,24 +1561,42 @@ function updateSettingsMirrors(changes) { for (const [key, value] of Object.entr
 function callRuntimeMethod(owner, method, ...args) { return owner && typeof owner[method] === "function" ? owner[method](...args) : undefined; }
 
 function reclampPetAfterEdgePinningChange() {
- if (!win || win.isDestroyed() || petWindowRuntime.isDragLocked() || _mini.getMiniMode() || _mini.getMiniTransitioning()) return;
- const clamped = computeFinalDragBounds(getPetWindowBounds(), getEffectiveCurrentPixelSize(), clampToScreenVisual);
- if (clamped) applyPetWindowBounds(clamped);
- syncHitWin();
+  if (!win || win.isDestroyed() || petWindowRuntime.isDragLocked() || _mini.getMiniMode() || _mini.getMiniTransitioning()) return;
+  const clamped = computeFinalDragBounds(getPetWindowBounds(), getEffectiveCurrentPixelSize(), clampToScreenVisual);
+  if (clamped) applyPetWindowBounds(clamped);
+  syncHitWin(); repositionFloatingBubbles();
 }
 
 const settingsEffectRouter = createSettingsEffectRouter({
- settingsController: _settingsController,
- BrowserWindow,
- updateMirrors: updateSettingsMirrors,
- createTray,
- destroyTray,
- applyDockVisibility,
- sendToRenderer, reclampPetAfterEdgePinningChange,
- rebuildAllMenus,
- logWarn: console.warn,
+  settingsController: _settingsController,
+  BrowserWindow,
+  updateMirrors: updateSettingsMirrors,
+  createTray,
+  destroyTray,
+  applyDockVisibility,
+  sendToRenderer,
+  sendDashboardI18n: () => sendDashboardI18n(),
+  sendSessionHudI18n: () => sendSessionHudI18n(),
+  emitSessionSnapshot: (options) => _state.emitSessionSnapshot(options),
+  cleanStaleSessions: () => _state.cleanStaleSessions(),
+  syncPermissionShortcuts,
+  dismissInteractivePermissionBubbles: () => callRuntimeMethod(_perm, "dismissInteractivePermissionBubbles"),
+  clearCodexNotifyBubbles,
+  clearKimiNotifyBubbles,
+  refreshPassiveNotifyAutoClose: () => callRuntimeMethod(_perm, "refreshPassiveNotifyAutoClose"),
+  refreshPermissionAutoCloseForPolicy: () => callRuntimeMethod(_perm, "refreshPermissionAutoCloseForPolicy"),
+  hideUpdateBubbleForPolicy: () => callRuntimeMethod(_updateBubble, "hideForPolicy"),
+  refreshUpdateBubbleAutoClose: () => callRuntimeMethod(_updateBubble, "refreshAutoCloseForPolicy"),
+  repositionFloatingBubbles,
+  syncSessionHudVisibility: () => syncSessionHudVisibility(),
+  reclampPetAfterEdgePinningChange,
+  rebuildAllMenus,
+  logWarn: console.warn,
 });
 settingsEffectRouter.start();
+_settingsController.subscribeKey("tgApproval", () => {
+  queueTelegramApprovalSidecarSync("settings");
+});
 
 animationOverridesMain = createSettingsAnimationOverridesMain({
   app,
@@ -832,8 +1620,13 @@ registerSettingsAnimationOverridesIpc({
 });
 // ── Auto-updater — delegated to src/updater.js ──
 const _updaterCtx = {
+  get doNotDisturb() { return doNotDisturb; },
+  get miniMode() { return _mini.getMiniMode(); },
+  get lang() { return lang; },
   t, rebuildAllMenus, updateLog,
-    setUpdateVisualState: (kind) => _state.setUpdateVisualState(kind),
+  showUpdateBubble: (payload) => showUpdateBubble(payload),
+  hideUpdateBubble: () => hideUpdateBubble(),
+  setUpdateVisualState: (kind) => _state.setUpdateVisualState(kind),
   applyState: (state, svgOverride) => applyState(state, svgOverride),
   resolveDisplayState: () => resolveDisplayState(),
   getSvgOverride: (state) => getSvgOverride(state),
@@ -842,10 +1635,38 @@ const _updaterCtx = {
 const _updater = require("./updater")(_updaterCtx);
 const { setupAutoUpdater, checkForUpdates, getUpdateMenuItem, getUpdateMenuLabel } = _updater;
 
+// ── Doctor tab IPC ──
+const { registerDoctorIpc } = require("./doctor-ipc");
+registerDoctorIpc({
+  ipcMain,
+  app,
+  shell,
+  server: _server,
+  getPrefsSnapshot: () => _settingsController.getSnapshot(),
+  getDoNotDisturb: () => doNotDisturb,
+  getLocale: () => _settingsController.get("lang") || "en",
+});
 
 // ── Remote SSH (Phase 2) ──
 //
 // Runtime owner of background SSH tunnels. Profile CRUD goes through
+// settings-controller (commands "remoteSsh.add" / .update / .delete);
+// runtime state (Connect / Disconnect / Deploy / Authenticate / Open
+// Terminal) goes through `remote-ssh-ipc.js`. Cleanup on app quit kills
+// any spawned ssh / scp children.
+const { createRemoteSshRuntime } = require("./remote-ssh-runtime");
+const { registerRemoteSshIpc } = require("./remote-ssh-ipc");
+const _remoteSshRuntime = createRemoteSshRuntime({
+  getHookServerPort: () => getHookServerPort(),
+  log: (...args) => console.warn("Clawd remote-ssh:", ...args),
+});
+const _remoteSshIpc = registerRemoteSshIpc({
+  ipcMain,
+  settingsController: _settingsController,
+  remoteSshRuntime: _remoteSshRuntime,
+  BrowserWindow,
+  isPackaged: app.isPackaged,
+});
 
 // ── Settings panel window ──
 //
@@ -899,7 +1720,9 @@ registerSettingsIpc({
   fs,
   path,
   settingsController: _settingsController,
-  themeLoader,  getSettingsWindow,
+  themeLoader,
+  codexPetMain,
+  getSettingsWindow,
   getActiveTheme: () => getActiveTheme(),
   getLang: () => lang,
   settingsSizePreviewSession,
@@ -907,9 +1730,34 @@ registerSettingsIpc({
   sendToRenderer,
   getDoNotDisturb: () => doNotDisturb,
   getSoundMuted: () => soundMuted,
-  getSoundVolume: () => soundVolume,  checkForUpdates,
+  getSoundVolume: () => soundVolume,
+  getAllAgents,
+  checkForUpdates,
   aboutHeroSvgPath: path.join(__dirname, "..", "assets", "svg", "clawd-about-hero.svg"),
 });
+
+registerSessionIpc({
+  ipcMain,
+  getSessionSnapshot: () => _state.buildSessionSnapshot(),
+  getI18n: () => getDashboardI18nPayload(),
+  focusSession: (sessionId, options) => focusDashboardSession(sessionId, options),
+  hideSession: (sessionId) => hideDashboardSession(sessionId),
+  setSessionAlias: (payload) => _settingsController.applyCommand("setSessionAlias", payload),
+  showDashboard: (options) => showDashboard(options),
+  setSessionHudPinned: (value) => {
+    const result = _settingsController.applyUpdate("sessionHudPinned", !!value);
+    if (result && typeof result.then === "function") {
+      result
+        .then((r) => {
+          if (r && r.status === "error") console.warn("Clawd: failed to pin Session HUD:", r.message);
+        })
+        .catch((err) => console.warn("Clawd: failed to pin Session HUD:", err && err.message));
+    } else if (result && result.status === "error") {
+      console.warn("Clawd: failed to pin Session HUD:", result.message);
+    }
+  },
+});
+
 function createWindow() {
   // Read everything from the settings controller. The mirror caches above
   // (lang/showTray/etc.) were already initialized at module-load time, so
@@ -984,7 +1832,8 @@ function createWindow() {
   win.on("move", () => petWindowRuntime.syncFloatingWindowsAfterPetBoundsChange());
   win.on("resize", () => petWindowRuntime.syncFloatingWindowsAfterPetBoundsChange());
 
-  
+  syncSessionHudVisibility();
+
   registerPetInteractionIpc({
     ipcMain,
     showContextMenu: (event) => showPetContextMenu(event),
@@ -1011,29 +1860,44 @@ function createWindow() {
     applyPetWindowBounds: (bounds) => applyPetWindowBounds(bounds),
     reassertWinTopmost: () => reassertWinTopmost(),
     scheduleHwndRecovery: () => scheduleHwndRecovery(),
-       exitMiniMode: () => exitMiniMode(),
-  checkCeilingSnap: () => _ceilingWalk.checkCeilingSnap(),
-  checkCeilingDragExit: () => _ceilingWalk.checkCeilingDragExit(),
-      checkDockDragExit: () => _dockWalk.checkDockDragExit(),
-          });
+    repositionFloatingBubbles: () => repositionFloatingBubbles(),
+    exitMiniMode: () => exitMiniMode(),
+    getFocusableLocalHudSessionIds: () => getFocusableLocalHudSessionIds(),
+    focusLog: (message) => focusLog(message),
+    showDashboard: () => showDashboard(),
+    focusSession: (sessionId, options) => focusDashboardSession(sessionId, options),
+  checkDockDragExit: () => _dockWalk.checkDockDragExit(),
+  });
 
-    // ── Dock-walk IPC handlers ──
-    ipcMain.on("dock-walk-enter", () => {
-      const caps = themeRuntime.getActiveThemeCapabilities();
-      if (caps && caps.dockWalk && !_dockWalk.isDocked()) {
-        _dockWalk.enterDetectionMode();
-      }
-    });
-    ipcMain.on("dock-walk-exit", () => {
-      if (_dockWalk.isDocked()) _dockWalk.exitDockWalk();
-    });
-    ipcMain.on("dock-walk-detect-click", (_event, screenX, screenY) => {
-      _dockWalk.handleDetectClick(screenX, screenY);
-    });
+  // ── Dock-walk IPC handlers ──
+  ipcMain.on("dock-walk-enter", () => {
+    const caps = themeRuntime.getActiveThemeCapabilities();
+    if (caps && caps.dockWalk && !_dockWalk.isDocked()) {
+      _dockWalk.enterDetectionMode();
+    }
+  });
+  ipcMain.on("dock-walk-exit", () => {
+    if (_dockWalk.isDocked()) _dockWalk.exitDockWalk();
+  });
+  ipcMain.on("dock-walk-detect-click", (_event, screenX, screenY) => {
+    _dockWalk.handleDetectClick(screenX, screenY);
+  });
+
+  registerPermissionIpc({
+    ipcMain,
+    permission: _perm,
+  });
+
+  registerUpdateBubbleIpc({
+    ipcMain,
+    updateBubble: _updateBubble,
+  });
+
   initFocusHelper();
   startMainTick();
   startHttpServer();
-    // Wait for renderer to be ready before sending initial state
+  startStaleCleanup();
+  // Wait for renderer to be ready before sending initial state
   // If hooks arrived during startup, respect them instead of forcing idle
   // Also handles crash recovery (render-process-gone → reload)
   win.webContents.on("did-start-loading", () => {
@@ -1113,13 +1977,11 @@ const _miniCtx = {
   applyPetWindowBounds,
   applyPetWindowPosition,
   setViewportOffsetY,
-  get bubbleFollowPet() { return false; },
-  get pendingPermissions() { return []; },
-  repositionBubbles: () => {},
-  syncSessionHudVisibility: () => {},
-  repositionSessionHud: () => {},
-  focusableLocalHudSessionIds: () => [],
-  focusSession: () => {},
+  get bubbleFollowPet() { return bubbleFollowPet; },
+  get pendingPermissions() { return pendingPermissions; },
+  repositionBubbles: () => repositionFloatingBubbles(),
+  syncSessionHudVisibility: () => syncSessionHudVisibilityAndBubbles(),
+  repositionSessionHud: () => repositionSessionHud(),
   buildContextMenu: () => buildContextMenu(),
   buildTrayMenu: () => buildTrayMenu(),
   getAnimationAssetCycleMs: (file) => {
@@ -1133,8 +1995,7 @@ const _miniCtx = {
   },
 };
 const _mini = require("./mini")(_miniCtx);
-const { enterMiniMode, exitMiniMode, enterMiniViaMenu, miniPeekIn, miniPeekOut,
-        checkMiniModeSnap, cancelMiniTransition, animateWindowX, animateWindowParabola } = _mini;
+
 // ── Ceiling Walk — stick to top edge and walk along ceiling ──
 const _ceilingWalk = createCeilingWalk({
   get win() { return win; },
@@ -1159,29 +2020,13 @@ const _dockWalk = createDockWalk({
   applyState,
   syncHitWin,
   sendToRenderer,
-  detectWindowAtPoint: (sx, sy) => {
-    const ownIds = new Set();
-    if (win && !win.isDestroyed()) {
-      try { ownIds.add(Number(win.getNativeWindowHandle().readBigUInt64LE(0))); } catch {}
-    }
-    if (hitWin && !hitWin.isDestroyed()) {
-      try { ownIds.add(Number(hitWin.getNativeWindowHandle().readBigUInt64LE(0))); } catch {}
-    }
-    return dockWalkDetect.detectWindowAtPoint(sx, sy, ownIds);
-  },
-  getWindowBounds: (handle) => dockWalkDetect.getWindowBounds(handle),
-  getWindowVisibility: (handle) => {
-    const ownIds = new Set();
-    if (win && !win.isDestroyed()) {
-      try { ownIds.add(Number(win.getNativeWindowHandle().readBigUInt64LE(0))); } catch {}
-    }
-    if (hitWin && !hitWin.isDestroyed()) {
-      try { ownIds.add(Number(hitWin.getNativeWindowHandle().readBigUInt64LE(0))); } catch {}
-    }
-    return dockWalkDetect.getWindowVisibility(handle, ownIds);
-  },
+  detectWindowAtPoint: dockWalkDetect.detectWindowAtPoint,
+  getWindowBounds: dockWalkDetect.getWindowBounds,
+  getWindowVisibility: dockWalkDetect.getWindowVisibility,
   setDockWalkActive: (v) => _state.setDockWalkActive(v),
 });
+const { enterMiniMode, exitMiniMode, enterMiniViaMenu, miniPeekIn, miniPeekOut,
+        checkMiniModeSnap, cancelMiniTransition, animateWindowX, animateWindowParabola } = _mini;
 
 // Convenience getters for mini state (used throughout main.js)
 Object.defineProperties(this || {}, {}); // no-op placeholder
@@ -1193,13 +2038,65 @@ Object.defineProperties(this || {}, {}); // no-op placeholder
 // injected deps. main.js remains the composition root; theme-runtime owns the
 // active theme source and the cleanup/refresh/reload protocol.
 
+// ── Auto-install VS Code / Cursor terminal-focus extension ──
+const EXT_ID = "clawd.clawd-terminal-focus";
+const EXT_VERSION = "0.1.0";
+const EXT_DIR_NAME = `${EXT_ID}-${EXT_VERSION}`;
+
+function installTerminalFocusExtension() {
+  const os = require("os");
+  const home = os.homedir();
+
+  // Extension source — in dev: ../extensions/vscode/, in packaged: app.asar.unpacked/
+  let extSrc = path.join(__dirname, "..", "extensions", "vscode");
+  extSrc = extSrc.replace("app.asar" + path.sep, "app.asar.unpacked" + path.sep);
+
+  if (!fs.existsSync(extSrc)) {
+    console.log("Clawd: terminal-focus extension source not found, skipping auto-install");
+    return;
+  }
+
+  const targets = [
+    path.join(home, ".vscode", "extensions"),
+    path.join(home, ".cursor", "extensions"),
+  ];
+
+  const filesToCopy = ["package.json", "extension.js"];
+  let installed = 0;
+
+  for (const extRoot of targets) {
+    if (!fs.existsSync(extRoot)) continue; // editor not installed
+    const dest = path.join(extRoot, EXT_DIR_NAME);
+    // Skip if already installed (check package.json exists)
+    if (fs.existsSync(path.join(dest, "package.json"))) continue;
+    try {
+      fs.mkdirSync(dest, { recursive: true });
+      for (const file of filesToCopy) {
+        fs.copyFileSync(path.join(extSrc, file), path.join(dest, file));
+      }
+      installed++;
+      console.log(`Clawd: installed terminal-focus extension to ${dest}`);
+    } catch (err) {
+      console.warn(`Clawd: failed to install extension to ${dest}:`, err.message);
+    }
+  }
+  if (installed > 0) {
+    console.log(`Clawd: terminal-focus extension installed to ${installed} editor(s). Restart VS Code/Cursor to activate.`);
+  }
+}
 
 // ── Single instance lock ──
 app.on("open-url", (event, url) => {
-  event.preventDefault();});
+  event.preventDefault();
+  codexPetMain.enqueueImportUrl(url);
+});
 
-const gotTheLock = app.requestSingleInstanceLock("pomeranian-on-desk");
+const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
+  if (process.argv.includes(REGISTER_PROTOCOL_DEV_ARG)) {
+    const protocolRegistered = codexPetMain.registerProtocolClient();
+    console.log(`Clawd: clawd:// dev protocol registration ${protocolRegistered ? "succeeded" : "failed"}`);
+  }
   // Another instance is already running — quit silently
   app.quit();
 } else {
@@ -1214,7 +2111,9 @@ if (!gotTheLock) {
     }
     if (shouldOpenSettingsWindowFromArgv(commandLine)) {
       settingsWindowRuntime.openWhenReady();
-    }    reapplyMacVisibility();
+    }
+    codexPetMain.enqueueImportUrlsFromArgv(commandLine);
+    reapplyMacVisibility();
   });
 
   // macOS: hide dock icon early if user previously disabled it
@@ -1225,18 +2124,46 @@ if (!gotTheLock) {
   }
 
   app.whenReady().then(() => {
-// Protocol registration removed (codex pet import)
-try { hydrateSystemBackedSettings(); } catch (e) { console.warn(e); }
+    const protocolRegistered = codexPetMain.registerProtocolClient();
+    if (process.argv.includes(REGISTER_PROTOCOL_DEV_ARG)) {
+      console.log(`Clawd: clawd:// dev protocol registration ${protocolRegistered ? "succeeded" : "failed"}`);
+      app.quit();
+      return;
+    }
 
     // Import system-backed settings (openAtLogin) into prefs on first run.
     // Must run before createWindow() so the first menu draw sees the
     // hydrated value rather than the schema default.
-    hydrateSystemBackedSettings();    updateDebugLog = path.join(app.getPath("userData"), "update-debug.log");    focusDebugLog = path.join(app.getPath("userData"), "focus-debug.log");    createWindow();
+    hydrateSystemBackedSettings();
+
+    permDebugLog = path.join(app.getPath("userData"), "permission-debug.log");
+    updateDebugLog = path.join(app.getPath("userData"), "update-debug.log");
+    sessionDebugLog = path.join(app.getPath("userData"), "session-debug.log");
+    focusDebugLog = path.join(app.getPath("userData"), "focus-debug.log");
+    queueTelegramApprovalSidecarSync("startup");
+    createWindow();
     if (shouldOpenSettingsWindowFromArgv(process.argv)) {
       settingsWindowRuntime.open();
-    }  
+    }
+    codexPetMain.enqueueImportUrlsFromArgv(process.argv);
+    codexPetMain.flushPendingImportUrls().catch((err) => {
+      console.warn("Clawd: Codex Pet import queue failed:", err && err.message);
+    });
+
     // Register persistent global shortcuts from the validated prefs snapshot.
     shortcutRuntime.registerPersistentShortcutsFromSettings();
+
+    // Construct log monitors. We always instantiate them so toggling the
+    // agent on/off later can call start()/stop() without paying the require
+    // cost at click time. Whether we call .start() right now depends on the
+    // agent-gate snapshot — a user who disabled Codex at last shutdown
+    // shouldn't see its file watcher spin up on the next launch.
+    agentRuntime.startCodexLogMonitor();
+
+    // Auto-install VS Code/Cursor terminal-focus extension
+    try { installTerminalFocusExtension(); } catch (err) {
+      console.warn("Clawd: failed to auto-install terminal-focus extension:", err.message);
+    }
 
     // Auto-updater: setup event handlers (user triggers check via tray menu)
     setupAutoUpdater();
@@ -1246,13 +2173,25 @@ try { hydrateSystemBackedSettings(); } catch (e) { console.warn(e); }
     isQuitting = true;
     flushRuntimeStateToPrefs();
     globalShortcut.unregisterAll();
-    void settingsSizePreviewSession.cleanup();    _server.cleanup();    _state.cleanup();
+    void settingsSizePreviewSession.cleanup();
+    stopTelegramApprovalSidecar();
+    _perm.cleanup();
+    _server.cleanup();
+    _updateBubble.cleanup();
+    _state.cleanup();
     _tick.cleanup();
-    _mini.cleanup();    topmostRuntime.cleanup();
+    _mini.cleanup();
+    _sessionHud.cleanup();
+    agentRuntime.cleanup();
+    topmostRuntime.cleanup();
     themeRuntime.cleanup();
- _dockWalk.cleanup();
-    _focus.cleanup();
-    if (animationOverridesMain) animationOverridesMain.cleanup();    if (hitWin && !hitWin.isDestroyed()) hitWin.destroy();
+  themeFadeSequencer.cleanup();
+  _dockWalk.cleanup();
+  _focus.cleanup();
+    if (animationOverridesMain) animationOverridesMain.cleanup();
+    try { _remoteSshIpc.dispose(); } catch {}
+    try { _remoteSshRuntime.cleanup(); } catch {}
+    if (hitWin && !hitWin.isDestroyed()) hitWin.destroy();
   });
 
   app.on("window-all-closed", () => {
