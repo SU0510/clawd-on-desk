@@ -76,7 +76,7 @@ function makeCtx(overrides = {}) {
   return {
     createHttpServer: null,
     setImmediate: () => {},
-    getPortCandidates: () => [23333],
+    getPortCandidates: () => [23433],
     writeRuntimeConfig: () => true,
     clearRuntimeConfig: () => true,
     readRuntimePort: () => null,

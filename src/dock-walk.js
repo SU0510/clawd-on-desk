@@ -74,6 +74,8 @@ module.exports = function initDockWalk(ctx) {
     if (docked || detecting) return;
     detecting = true;
     ctx.sendToRenderer("dock-detecting", true);
+    if (ctx.sendToHitWin) ctx.sendToHitWin("hit-dock-detecting-sync", true, typeof ctx.getDetectHint === "function" ? ctx.getDetectHint() : "Click a window to dock");
+ if (ctx.expandHitWinFullScreen) ctx.expandHitWinFullScreen();
     detectionTimer = setTimeout(() => {
       // Timeout — no window clicked
       cancelDetection("timeout");
@@ -84,7 +86,9 @@ module.exports = function initDockWalk(ctx) {
     if (!detecting) return;
     detecting = false;
     if (detectionTimer) { clearTimeout(detectionTimer); detectionTimer = null; }
+ if (ctx.restoreHitWinSize) ctx.restoreHitWinSize();
     ctx.sendToRenderer("dock-detecting", false);
+    if (ctx.sendToHitWin) ctx.sendToHitWin("hit-dock-detecting-sync", false);
     if (reason === "timeout") {
       ctx.sendToRenderer("dock-detect-cancelled");
     }
@@ -96,7 +100,8 @@ module.exports = function initDockWalk(ctx) {
     cancelDetection("success");
 
     try {
-      const result = await ctx.detectWindowAtPoint(screenX, screenY);
+      const ownIds = typeof ctx.getOwnWindowIds === "function" ? ctx.getOwnWindowIds() : new Set();
+    const result = await ctx.detectWindowAtPoint(screenX, screenY, ownIds);
       if (!result) {
         ctx.sendToRenderer("dock-detect-cancelled");
         return false;
@@ -118,6 +123,7 @@ module.exports = function initDockWalk(ctx) {
   function dock() {
     if (docked) return;
     docked = true;
+ if (ctx.restoreHitWinSize) ctx.restoreHitWinSize();
   if (ctx.setDockWalkActive) ctx.setDockWalkActive(true);
     dockState = "lie";
     happyActive = false;
@@ -301,7 +307,8 @@ module.exports = function initDockWalk(ctx) {
     const check = async () => {
       if (!docked) return;
       try {
-        const info = await ctx.getWindowVisibility(targetHandle);
+        const ownIds2 = typeof ctx.getOwnWindowIds === "function" ? ctx.getOwnWindowIds() : new Set();
+            const info = await ctx.getWindowVisibility(targetHandle, ownIds2);
         if (!info.exists) {
           // Window closed — auto-exit
           exitDockWalk();

@@ -9,7 +9,7 @@ export const STOP_DEBOUNCE_MS = 1500;
 
 const CLAWD_DIR = join(homedir(), ".clawd");
 const RUNTIME_CONFIG_PATH = join(CLAWD_DIR, "runtime.json");
-const SERVER_PORTS = [23333, 23334, 23335, 23336, 23337];
+const SERVER_PORTS = [23433, 23434, 23435, 23436, 23437];
 const POST_TIMEOUT_MS = 1000;
 
 const HOOK_NAMES = [

@@ -1351,3 +1351,42 @@ window.electronAPI.onDockWalkDirection((direction) => {
     }
   }
 });
+// --- Dock-walk detecting mode visual feedback ---
+let dockDetectingActive = false;
+let dockDetectAnimFrame = null;
+window.electronAPI.onDockDetecting((active) => {
+	dockDetectingActive = active;
+	if (active) {
+		startDockDetectPulse();
+	} else {
+		stopDockDetectPulse();
+	}
+});
+window.electronAPI.onDockDetectCancelled(() => {
+	dockDetectingActive = false;
+	stopDockDetectPulse();
+});
+
+function startDockDetectPulse() {
+	if (dockDetectAnimFrame) return;
+	const startTime = Date.now();
+	const pulse = () => {
+		if (!dockDetectingActive) return;
+		const elapsed = Date.now() - startTime;
+		const alpha = 0.3 + 0.3 * Math.sin(elapsed * 0.005);
+		container.style.boxShadow = `0 0 20px 6px rgba(100, 200, 255, ${alpha})`;
+		container.style.borderRadius = "12px";
+		dockDetectAnimFrame = requestAnimationFrame(pulse);
+	};
+	dockDetectAnimFrame = requestAnimationFrame(pulse);
+}
+
+function stopDockDetectPulse() {
+	if (dockDetectAnimFrame) {
+		cancelAnimationFrame(dockDetectAnimFrame);
+		dockDetectAnimFrame = null;
+	}
+	container.style.boxShadow = "";
+	container.style.borderRadius = "";
+}
+

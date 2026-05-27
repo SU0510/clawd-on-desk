@@ -35,7 +35,7 @@
   };
 
   const PROGRESS_LOG_MAX = 50;
-  const REMOTE_FORWARD_PORTS = [23333, 23334, 23335, 23336, 23337];
+  const REMOTE_FORWARD_PORTS = [23433, 23434, 23435, 23436, 23437];
 
   function t(key) {
     return helpers.t(key);
@@ -201,7 +201,7 @@
         host: "",
         port: 22,
         identityFile: "",
-        remoteForwardPort: 23333,
+        remoteForwardPort: 23433,
         hostPrefix: "",
         autoStartCodexMonitor: false,
         connectOnLaunch: false,

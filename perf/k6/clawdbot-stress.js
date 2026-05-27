@@ -5,7 +5,7 @@ import { Rate, Trend } from "k6/metrics";
 const successRate = new Rate("business_success");
 const appLatencyMs = new Trend("app_latency_ms");
 
-const BASE_URL = __ENV.BASE_URL || "http://127.0.0.1:23333";
+const BASE_URL = __ENV.BASE_URL || "http://127.0.0.1:23433";
 const API_PATH = __ENV.API_PATH || "/state";
 const METHOD = (__ENV.METHOD || "POST").toUpperCase();
 const SUITE = __ENV.SUITE || "quick";

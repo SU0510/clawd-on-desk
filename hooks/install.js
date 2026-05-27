@@ -697,7 +697,7 @@ const HTTP_HOOKS = {
     matcher: "",
     hook: {
       type: "http",
-      url: "http://127.0.0.1:23333/permission",
+      url: "http://127.0.0.1:23433/permission",
       timeout: 600,
     },
   },

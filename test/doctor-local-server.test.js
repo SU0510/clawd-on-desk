@@ -5,7 +5,7 @@ const { EventEmitter } = require("node:events");
 const initServer = require("../src/server");
 const { checkLocalServer } = require("../src/doctor-detectors/local-server");
 
-function makeServer({ runtimePort = 23333, addressPort = 23333, listening = true } = {}) {
+function makeServer({ runtimePort = 23433, addressPort = 23433, listening = true } = {}) {
   function createHttpServer() {
     const server = new EventEmitter();
     server.listening = listening;
@@ -39,7 +39,7 @@ describe("checkLocalServer", () => {
   });
 
   it("warns when runtime port is missing or stale", () => {
-    const api = makeServer({ runtimePort: 23334, addressPort: 23333 });
+    const api = makeServer({ runtimePort: 23434, addressPort: 23433 });
     api.startHttpServer();
 
     const result = checkLocalServer(api);

@@ -15,7 +15,7 @@
 //   port          — integer in [1, 65535] when set; default 22 means absent.
 //   identityFile  — absolute path; no control chars / newline; no leading `-`.
 //                   Existence checked at Connect time, not at write time.
-//   remoteForwardPort — integer in SERVER_PORTS (23333-23337). Anything
+//   remoteForwardPort — integer in SERVER_PORTS (23433-23437). Anything
 //                   outside is rejected at the schema layer.
 //   hostPrefix    — no control chars / newlines AND none of these shell-special
 //                   chars: ' " ` $ \ !  (! is bash history expansion). Together
@@ -24,7 +24,7 @@
 
 const path = require("path");
 
-const REMOTE_FORWARD_PORTS = [23333, 23334, 23335, 23336, 23337];
+const REMOTE_FORWARD_PORTS = [23433, 23434, 23435, 23436, 23437];
 
 const HOST_BARE_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const HOST_USER_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*@[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -193,7 +193,7 @@ function sanitizeProfile(raw) {
     identityFile: typeof raw.identityFile === "string" && raw.identityFile.length > 0
       ? raw.identityFile
       : undefined,
-    remoteForwardPort: Number.isInteger(raw.remoteForwardPort) ? raw.remoteForwardPort : 23333,
+    remoteForwardPort: Number.isInteger(raw.remoteForwardPort) ? raw.remoteForwardPort : 23433,
     hostPrefix: typeof raw.hostPrefix === "string" && raw.hostPrefix.length > 0
       ? raw.hostPrefix
       : undefined,

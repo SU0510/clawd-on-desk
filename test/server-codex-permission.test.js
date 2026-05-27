@@ -71,7 +71,7 @@ function startServer(overrides = {}) {
   const ctx = {
     createHttpServer: http.createHttpServer,
     setImmediate: () => {},
-    getPortCandidates: () => [23333],
+    getPortCandidates: () => [23433],
     writeRuntimeConfig: () => true,
     clearRuntimeConfig: () => true,
     readRuntimePort: () => null,

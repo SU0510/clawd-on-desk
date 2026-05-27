@@ -86,7 +86,7 @@ const baseProfile = {
   id: "p1",
   label: "My Pi",
   host: "user@pi",
-  remoteForwardPort: 23333,
+  remoteForwardPort: 23433,
   autoStartCodexMonitor: false,
   connectOnLaunch: false,
 };
@@ -302,7 +302,7 @@ test("remoteSsh:deploy stamps via markDeployed (not full update) on success", as
   // expectedTarget fingerprint captured at deploy start.
   assert.ok(args.expectedTarget, "must pass expectedTarget for drift detection");
   assert.equal(args.expectedTarget.host, "user@pi");
-  assert.equal(args.expectedTarget.remoteForwardPort, 23333);
+  assert.equal(args.expectedTarget.remoteForwardPort, 23433);
   assert.equal(args.remoteNode.nodeBin, "/usr/local/bin/node");
   assert.equal(args.remoteNode.version, "v20.10.0");
   // The full profile snapshot must NOT be in the args — that would defeat
@@ -333,7 +333,7 @@ test("runtime remote-node-detected event stamps profile node metadata", async ()
     detectedAt: 12345,
     expectedTarget: {
       host: "user@pi",
-      remoteForwardPort: 23333,
+      remoteForwardPort: 23433,
     },
   });
   await new Promise((r) => setImmediate(r));

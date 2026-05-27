@@ -107,7 +107,7 @@ test("buildSshArgs omits -p when port is 22 or absent", () => {
 test("buildSshArgs places extraOpts after profile defaults, before host", () => {
   const args = buildSshArgs(
     { host: "pi", identityFile: "/k", port: 2222 },
-    { extraOpts: ["-N", "-R", "127.0.0.1:23333:127.0.0.1:23333"] }
+    { extraOpts: ["-N", "-R", "127.0.0.1:23433:127.0.0.1:23433"] }
   );
   // Layout: SSH_BASE_OPTS, -i /k, -p 2222, ...extraOpts, host
   const hostIdx = args.indexOf("pi");
@@ -204,7 +204,7 @@ test("classifyStderr Host key verification failed → permanent host_key", () =>
 });
 
 test("classifyStderr remote port forwarding failed → permanent forward_failed", () => {
-  const c = classifyStderr("Warning: remote port forwarding failed for listen port 23333");
+  const c = classifyStderr("Warning: remote port forwarding failed for listen port 23433");
   assert.equal(c.kind, "permanent");
   assert.equal(c.reason, "forward_failed");
 });
@@ -288,14 +288,14 @@ test("classifyProbeExit unknown nonzero → transient", () => {
 // ── buildProbeCommand ──
 
 test("buildProbeCommand requires integer port", () => {
-  assert.throws(() => buildProbeCommand("23333"), /must be an integer/);
+  assert.throws(() => buildProbeCommand("23433"), /must be an integer/);
 });
 
 test("buildProbeCommand embeds remoteForwardPort + clawd header check", () => {
-  const cmd = buildProbeCommand(23335);
+  const cmd = buildProbeCommand(23435);
   assert.ok(cmd.startsWith("node -e "));
   // The JSON-quoted JS body should reference the port.
-  assert.ok(cmd.includes("23335"));
+  assert.ok(cmd.includes("23435"));
   assert.ok(cmd.includes(CLAWD_SERVER_HEADER));
   assert.ok(cmd.includes(CLAWD_SERVER_ID));
   // Must contain the v7-required exit codes.
@@ -307,14 +307,14 @@ test("buildProbeCommand embeds remoteForwardPort + clawd header check", () => {
 });
 
 test("buildProbeCommand can use a resolved absolute remote Node path", () => {
-  const cmd = buildProbeCommand(23335, "/home/me/.nvm/versions/node/v22/bin/node");
+  const cmd = buildProbeCommand(23435, "/home/me/.nvm/versions/node/v22/bin/node");
   assert.ok(cmd.startsWith("'/home/me/.nvm/versions/node/v22/bin/node' -e "));
-  assert.ok(cmd.includes("23335"));
+  assert.ok(cmd.includes("23435"));
 });
 
 test("buildProbeCommand returns valid JS that exits with each code under expected condition", () => {
   // Smoke: parse the embedded JS — it should not be syntactically broken.
-  const cmd = buildProbeCommand(23333);
+  const cmd = buildProbeCommand(23433);
   const jsBody = cmd.slice("node -e ".length);
   // jsBody is a JSON-encoded string; parse to get raw JS.
   const raw = JSON.parse(jsBody);
@@ -410,12 +410,12 @@ test("connect fails fast on legacy Windows OpenSSH before spawning tunnel", () =
       spawned = true;
       return makeMockChild();
     },
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
   });
   const events = [];
   rt.on("status-changed", (s) => events.push(s));
 
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
 
   const failed = events.find((e) => e.status === "failed");
   assert.ok(failed);
@@ -441,11 +441,11 @@ test("manual reconnect reruns ssh detection after legacy Windows OpenSSH failure
       spawnCalls += 1;
       return makeMockChild();
     },
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
-  const profile = { id: "p1", host: "pi", remoteForwardPort: 23333 };
+  const profile = { id: "p1", host: "pi", remoteForwardPort: 23433 };
 
   rt.connect(profile);
   assert.equal(rt.getProfileStatus("p1").status, "failed");
@@ -471,7 +471,7 @@ test("connect spawns ssh with main forward args + LANG=C env", async () => {
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23335,
+    getHookServerPort: () => 23435,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
@@ -479,7 +479,7 @@ test("connect spawns ssh with main forward args + LANG=C env", async () => {
   const profile = {
     id: "p1",
     host: "user@pi",
-    remoteForwardPort: 23333,
+    remoteForwardPort: 23433,
   };
   const events = [];
   rt.on("status-changed", (s) => events.push(s));
@@ -491,7 +491,7 @@ test("connect spawns ssh with main forward args + LANG=C env", async () => {
   assert.ok(args.includes("-N"));
   assert.ok(args.includes("-R"));
   const rIdx = args.indexOf("-R");
-  assert.equal(args[rIdx + 1], "127.0.0.1:23333:127.0.0.1:23335");
+  assert.equal(args[rIdx + 1], "127.0.0.1:23433:127.0.0.1:23435");
   assert.ok(args.includes("ExitOnForwardFailure=yes"));
   assert.equal(args[args.length - 1], "user@pi");
   // Env forces English locale.
@@ -512,12 +512,12 @@ test("hung probe child is hard-timed out so the probe loop can retry", async () 
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
 
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   timers.flushWhere((t) => t.ms === 0);
   assert.equal(children.length, 2, "main tunnel + first probe");
 
@@ -545,7 +545,7 @@ test("connect starts health probe immediately on remote Node cache miss", async 
   const rt = createRemoteSshRuntimeBase({
     detectSsh: DETECT_SSH_OK,
     spawn,
-    getHookServerPort: () => 23335,
+    getHookServerPort: () => 23435,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
     resolveRemoteNodeBin: () => {
@@ -554,7 +554,7 @@ test("connect starts health probe immediately on remote Node cache miss", async 
     },
   });
 
-  rt.connect({ id: "p1", host: "user@pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "user@pi", remoteForwardPort: 23433 });
   assert.equal(spawnCalls.length, 1, "main tunnel should spawn first");
 
   timers.flush();
@@ -582,13 +582,13 @@ test("bare node probe failure waits for in-flight resolver before failing", asyn
   const rt = createRemoteSshRuntimeBase({
     detectSsh: DETECT_SSH_OK,
     spawn,
-    getHookServerPort: () => 23335,
+    getHookServerPort: () => 23435,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
     resolveRemoteNodeBin: () => pendingResolver,
   });
 
-  rt.connect({ id: "p1", host: "user@pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "user@pi", remoteForwardPort: 23433 });
   timers.flushWhere((t) => t.ms === 0);
   assert.ok(spawnCalls.length >= 2);
   spawnCalls[1].child._fakeExit(127);
@@ -617,13 +617,13 @@ test("bare node probe does not keep spawning while absolute-node resolver is in 
   const rt = createRemoteSshRuntimeBase({
     detectSsh: DETECT_SSH_OK,
     spawn,
-    getHookServerPort: () => 23335,
+    getHookServerPort: () => 23435,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
     resolveRemoteNodeBin: () => pendingResolver,
   });
 
-  rt.connect({ id: "p1", host: "user@pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "user@pi", remoteForwardPort: 23433 });
   timers.flushWhere((t) => t.ms === 0);
   assert.equal(spawnCalls.length, 2, "main tunnel + first bare-node probe");
   spawnCalls[1].child._fakeExit(127);
@@ -649,11 +649,11 @@ test("disconnect followed by reconnect clears a stale in-flight node resolver ga
     return child;
   };
   const timers = makeFakeTimers();
-  const profile = { id: "p1", host: "user@pi", remoteForwardPort: 23333 };
+  const profile = { id: "p1", host: "user@pi", remoteForwardPort: 23433 };
   const rt = createRemoteSshRuntimeBase({
     detectSsh: DETECT_SSH_OK,
     spawn,
-    getHookServerPort: () => 23335,
+    getHookServerPort: () => 23435,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
     resolveRemoteNodeBin: () => pendingResolver,
@@ -690,7 +690,7 @@ test("connect uses persisted remote Node path and skips background resolver", as
   const rt = createRemoteSshRuntimeBase({
     detectSsh: DETECT_SSH_OK,
     spawn,
-    getHookServerPort: () => 23335,
+    getHookServerPort: () => 23435,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
     resolveRemoteNodeBin: () => {
@@ -702,7 +702,7 @@ test("connect uses persisted remote Node path and skips background resolver", as
   rt.connect({
     id: "p1",
     host: "user@pi",
-    remoteForwardPort: 23333,
+    remoteForwardPort: 23433,
     detectedRemoteNodeBin: "/home/me/.nvm/versions/node/v22/bin/node",
     detectedRemoteNodeVersion: "v22.1.0",
     detectedRemoteNodeSource: "profile",
@@ -728,7 +728,7 @@ test("cached absolute node probe failure clears cache and re-resolves", async ()
   const rt = createRemoteSshRuntimeBase({
     detectSsh: DETECT_SSH_OK,
     spawn,
-    getHookServerPort: () => 23335,
+    getHookServerPort: () => 23435,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
     resolveRemoteNodeBin: (options) => {
@@ -740,7 +740,7 @@ test("cached absolute node probe failure clears cache and re-resolves", async ()
   rt.connect({
     id: "p1",
     host: "user@pi",
-    remoteForwardPort: 23333,
+    remoteForwardPort: 23433,
     detectedRemoteNodeBin: "/stale/node",
     detectedRemoteNodeVersion: "v20.0.0",
     detectedRemoteNodeSource: "profile",
@@ -773,7 +773,7 @@ test("connect emits remote-node-detected when background resolver succeeds", asy
   const rt = createRemoteSshRuntimeBase({
     detectSsh: DETECT_SSH_OK,
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
     resolveRemoteNodeBin: async () => ({
@@ -785,7 +785,7 @@ test("connect emits remote-node-detected when background resolver succeeds", asy
   });
   const events = [];
   rt.on("remote-node-detected", (payload) => events.push(payload));
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   timers.flushWhere((t) => t.ms === 0);
   spawnCalls[1].child._fakeExit(0);
 
@@ -805,13 +805,13 @@ test("connect classifies Permission denied as permanent failed (no retry)", asyn
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
   const events = [];
   rt.on("status-changed", (s) => events.push(s));
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
 
   mainChild._fakeStderr("ssh: Permission denied (publickey).");
   await new Promise((r) => setImmediate(r));
@@ -836,7 +836,7 @@ test("connect preserves auth failures reported by remote Node resolver", async (
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
     resolveRemoteNodeBin: async () => ({
@@ -847,7 +847,7 @@ test("connect preserves auth failures reported by remote Node resolver", async (
   });
   const events = [];
   rt.on("status-changed", (s) => events.push(s));
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   timers.flushWhere((t) => t.ms === 0);
   spawnCalls[1]._fakeExit(127);
 
@@ -871,13 +871,13 @@ test("connect classifies Connection timed out as transient + schedules reconnect
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
   const events = [];
   rt.on("status-changed", (s) => events.push(s));
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   const mainChild = children[0];
   mainChild._fakeStderr("ssh: connect to host pi port 22: Connection timed out");
   await new Promise((r) => setImmediate(r));
@@ -903,11 +903,11 @@ test("3 unknown exits in a row escalate to permanent failed", async () => {
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
 
   // Helper to simulate one unknown-stderr exit then flush backoff timer.
   async function unknownExit() {
@@ -935,11 +935,11 @@ test("disconnect tears down child, sets idle, and stops reconnect", async () => 
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   rt.disconnect("p1");
   assert.equal(rt.getProfileStatus("p1").status, "idle");
   assert.equal(rt.getProfileStatus("p1").hint, null);
@@ -948,7 +948,7 @@ test("disconnect tears down child, sets idle, and stops reconnect", async () => 
 });
 
 test("disconnect on unknown profile is a no-op", () => {
-  const rt = createRemoteSshRuntime({ getHookServerPort: () => 23333 });
+  const rt = createRemoteSshRuntime({ getHookServerPort: () => 23433 });
   const result = rt.disconnect("nope");
   assert.equal(result.profileId, "nope");
   assert.equal(result.status, "idle");
@@ -962,7 +962,7 @@ test("getHookServerPort failure → finishFailure with no_local_port", () => {
   });
   const events = [];
   rt.on("status-changed", (s) => events.push(s));
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   const failed = events.find((e) => e.status === "failed");
   assert.ok(failed);
   assert.equal(failed.lastErrorReason, "no_local_port");
@@ -972,15 +972,15 @@ test("connect on already-connected is idempotent", () => {
   const child = makeMockChild();
   const rt = createRemoteSshRuntime({
     spawn: () => child,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: () => 1,
     clearTimeout: () => {},
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   // Hand-flip status — simulating a probe success.
   const before = rt.getProfileStatus("p1");
   // Calling connect again should not throw.
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   const after = rt.getProfileStatus("p1");
   assert.equal(before.status, after.status);
   rt.cleanup();
@@ -999,11 +999,11 @@ test("probe child error event clears probeInFlight (defensive against missing ex
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   // children[0] is main ssh; flush probe schedule timer to actually spawn probe.
   timers.flush();
   await new Promise((r) => setImmediate(r));
@@ -1036,16 +1036,16 @@ test("stale main ssh exit (post Disconnect+Connect) is identity-gated", async ()
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   const childA = children[0];
   // Disconnect kills A (queues A.exit microtask via the mock kill()).
   // Then synchronously reconnect — spawns B before A.exit fires.
   rt.disconnect("p1");
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   const childB = children[1];
   assert.notEqual(childA, childB);
   // Drain microtasks — A.exit fires NOW; identity gate must drop it.
@@ -1071,14 +1071,14 @@ test("stale main ssh error (post Disconnect+Connect) is identity-gated", async (
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   const childA = children[0];
   rt.disconnect("p1");
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   // A's error fires after we've already swapped to B.
   childA.emit("error", Object.assign(new Error("late ENOENT"), { code: "ENOENT" }));
   await new Promise((r) => setImmediate(r));
@@ -1095,11 +1095,11 @@ test("stale probe exitCode=0 (after probe rotation) does NOT falsely flip new co
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   // children[0] = main A; flush schedNextProbe timer to actually spawn probe1.
   timers.flush();
   await new Promise((r) => setImmediate(r));
@@ -1108,7 +1108,7 @@ test("stale probe exitCode=0 (after probe rotation) does NOT falsely flip new co
   // Disconnect kills probe1 (queues exit) and main A. Reconnect spawns
   // main B + (after timer flush) probe2.
   rt.disconnect("p1");
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   timers.flush();
   await new Promise((r) => setImmediate(r));
   const probe2 = children[3];
@@ -1135,16 +1135,16 @@ test("stale probe error (after probe rotation) does NOT clear new probe's lock",
   const timers = makeFakeTimers();
   const rt = createRemoteSshRuntime({
     spawn,
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: timers.setTimeoutFn,
     clearTimeout: timers.clearTimeoutFn,
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   timers.flush();
   await new Promise((r) => setImmediate(r));
   const probe1 = children[1];
   rt.disconnect("p1");
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
   timers.flush();
   await new Promise((r) => setImmediate(r));
   const probe2 = children[3];
@@ -1175,7 +1175,7 @@ test("cleanup() kills aux children registered via registerChild()", () => {
   // before-quit doesn't orphan a Deploy in progress.
   const rt = createRemoteSshRuntime({
     spawn: () => makeMockChild(),
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: () => 1,
     clearTimeout: () => {},
   });
@@ -1191,7 +1191,7 @@ test("cleanup() kills aux children registered via registerChild()", () => {
 test("unregisterChild() drops child from cleanup set", () => {
   const rt = createRemoteSshRuntime({
     spawn: () => makeMockChild(),
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: () => 1,
     clearTimeout: () => {},
   });
@@ -1206,12 +1206,12 @@ test("unregisterChild() drops child from cleanup set", () => {
 test("listStatuses returns array of all known profile snapshots", () => {
   const rt = createRemoteSshRuntime({
     spawn: () => makeMockChild(),
-    getHookServerPort: () => 23333,
+    getHookServerPort: () => 23433,
     setTimeout: () => 1,
     clearTimeout: () => {},
   });
-  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23333 });
-  rt.connect({ id: "p2", host: "mac", remoteForwardPort: 23334 });
+  rt.connect({ id: "p1", host: "pi", remoteForwardPort: 23433 });
+  rt.connect({ id: "p2", host: "mac", remoteForwardPort: 23434 });
   const list = rt.listStatuses();
   assert.equal(list.length, 2);
   const ids = list.map((x) => x.profileId).sort();

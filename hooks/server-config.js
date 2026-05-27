@@ -3,14 +3,14 @@ const http = require("http");
 const os = require("os");
 const path = require("path");
 
-const CLAWD_SERVER_ID = "clawd-on-desk";
+const CLAWD_SERVER_ID = "pomeranian-on-desk";
 const CLAWD_SERVER_HEADER = "x-clawd-server";
-const DEFAULT_SERVER_PORT = 23333;
+const DEFAULT_SERVER_PORT = 23433;
 const SERVER_PORT_COUNT = 5;
 const SERVER_PORTS = Array.from({ length: SERVER_PORT_COUNT }, (_, i) => DEFAULT_SERVER_PORT + i);
 const STATE_PATH = "/state";
 const PERMISSION_PATH = "/permission";
-const RUNTIME_CONFIG_PATH = path.join(os.homedir(), ".clawd", "runtime.json");
+const RUNTIME_CONFIG_PATH = path.join(os.homedir(), ".pomeranian", "runtime.json");
 const DEFAULT_HOOK_HTTP_TIMEOUT_MS = 100;
 const REMOTE_HOOK_HTTP_TIMEOUT_MS = 5000;
 
@@ -19,7 +19,7 @@ function normalizePort(value) {
   return Number.isInteger(port) && SERVER_PORTS.includes(port) ? port : null;
 }
 
-const HOST_PREFIX_PATH = path.join(os.homedir(), ".claude", "hooks", "clawd-host-prefix");
+const HOST_PREFIX_PATH = path.join(os.homedir(), ".claude", "hooks", "pomeranian-host-prefix");
 
 function readHostPrefix() {
   let prefix = null;

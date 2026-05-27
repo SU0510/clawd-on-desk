@@ -7,21 +7,25 @@ const hitThemeConfig = hitThemeArg ? JSON.parse(hitThemeArg.slice("--hit-theme-c
 contextBridge.exposeInMainWorld("hitThemeConfig", hitThemeConfig);
 
 contextBridge.exposeInMainWorld("hitAPI", {
-  // Theme config push (for hot-switch; additionalArguments won't update on reload)
-  onThemeConfig: (cb) => ipcRenderer.on("theme-config", (_, cfg) => cb(cfg)),
-  // Sends → main
-  dragLock: (locked) => ipcRenderer.send("drag-lock", locked),
-  dragMove: () => ipcRenderer.send("drag-move"),
-  dragEnd: () => ipcRenderer.send("drag-end"),
-  showContextMenu: () => ipcRenderer.send("show-context-menu"),
-  focusTerminal: () => ipcRenderer.send("focus-terminal"),
-  exitMiniMode: () => ipcRenderer.send("exit-mini-mode"),
-  showDashboard: () => ipcRenderer.send("show-dashboard"),
-  // Reaction triggers → main → renderWin
-  startDragReaction: () => ipcRenderer.send("start-drag-reaction"),
-  endDragReaction: () => ipcRenderer.send("end-drag-reaction"),
-  playClickReaction: (svg, duration) => ipcRenderer.send("play-click-reaction", svg, duration),
-  // State sync ← main
-  onStateSync: (cb) => ipcRenderer.on("hit-state-sync", (_, data) => cb(data)),
-  onCancelReaction: (cb) => ipcRenderer.on("hit-cancel-reaction", () => cb()),
+	// Theme config push (for hot-switch; additionalArguments won't update on reload)
+	onThemeConfig: (cb) => ipcRenderer.on("theme-config", (_, cfg) => cb(cfg)),
+	// Sends → main
+	dragLock: (locked) => ipcRenderer.send("drag-lock", locked),
+	dragMove: () => ipcRenderer.send("drag-move"),
+	dragEnd: () => ipcRenderer.send("drag-end"),
+	showContextMenu: () => ipcRenderer.send("show-context-menu"),
+	focusTerminal: () => ipcRenderer.send("focus-terminal"),
+	exitMiniMode: () => ipcRenderer.send("exit-mini-mode"),
+	showDashboard: () => ipcRenderer.send("show-dashboard"),
+	// Reaction triggers → main → renderWin
+	startDragReaction: () => ipcRenderer.send("start-drag-reaction"),
+	endDragReaction: () => ipcRenderer.send("end-drag-reaction"),
+	playClickReaction: (svg, duration) => ipcRenderer.send("play-click-reaction", svg, duration),
+	// Dock-walk detection click → main
+	sendDockDetectClick: (screenX, screenY) => ipcRenderer.send("dock-walk-detect-click", screenX, screenY),
+	// State sync ← main
+	onStateSync: (cb) => ipcRenderer.on("hit-state-sync", (_, data) => cb(data)),
+	onCancelReaction: (cb) => ipcRenderer.on("hit-cancel-reaction", () => cb()),
+	// Dock-walk detecting state sync ← main
+	onDockDetectingSync: (cb) => ipcRenderer.on("hit-dock-detecting-sync", (_, active, hint) => cb(active, hint)),
 });

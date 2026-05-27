@@ -85,7 +85,7 @@ function makeServer(overrides = {}) {
       PermissionRequest: [
         {
           matcher: "",
-          hooks: [{ type: "http", url: "http://127.0.0.1:23333/permission", timeout: 600 }],
+          hooks: [{ type: "http", url: "http://127.0.0.1:23433/permission", timeout: 600 }],
         },
       ],
     },
@@ -98,7 +98,7 @@ function makeServer(overrides = {}) {
     setImmediate: (fn) => fn(),
     setTimeout: timers.setTimeout,
     clearTimeout: timers.clearTimeout,
-    getPortCandidates: () => [23333],
+    getPortCandidates: () => [23433],
     readRuntimePort: () => null,
     writeRuntimeConfig: () => true,
     clearRuntimeConfig: () => true,
@@ -266,7 +266,7 @@ describe("server Claude hook management", () => {
         PermissionRequest: [
           {
             matcher: "",
-            hooks: [{ type: "http", url: "http://127.0.0.1:23335/permission", timeout: 600 }],
+            hooks: [{ type: "http", url: "http://127.0.0.1:23435/permission", timeout: 600 }],
           },
         ],
       },

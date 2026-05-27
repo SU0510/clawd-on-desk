@@ -37,7 +37,7 @@ function getAllowedLogDirs(options = {}) {
   const pathApi = options.path || path;
   const homeDir = options.homeDir || os.homedir();
   return uniqueDirs([
-    pathApi.join(homeDir, ".clawd"),
+    pathApi.join(homeDir, ".pomeranian"),
     options.userDataDir,
   ], pathApi);
 }
@@ -78,7 +78,7 @@ function resolveClawdLogTarget(options = {}) {
     return { status: "file", path: candidates[0].path };
   }
 
-  const fallbackDir = dirs[0] || pathApi.join(os.homedir(), ".clawd");
+  const fallbackDir = dirs[0] || pathApi.join(os.homedir(), ".pomeranian");
   return { status: "directory", path: fallbackDir, reason: "no-log-found" };
 }
 

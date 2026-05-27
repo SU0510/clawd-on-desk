@@ -91,7 +91,7 @@ test("isValidRemoteNodeBin accepts absolute POSIX paths including spaces", () =>
 
 test("resolveRemoteNodeBin records ssh command and caches successful result", async () => {
   clearRemoteNodeCache();
-  const profile = { id: "p1", host: "pi", remoteForwardPort: 23333 };
+  const profile = { id: "p1", host: "pi", remoteForwardPort: 23433 };
   const { spawn, calls } = makeRecordingSpawn([{
     stdout: [
       "CLAWD_REMOTE_NODE_BIN=/home/me/.nvm/versions/node/v22.1.0/bin/node",
@@ -122,7 +122,7 @@ test("resolveRemoteNodeBin reuses persisted profile Node metadata without spawni
   const profile = {
     id: "p1",
     host: "pi",
-    remoteForwardPort: 23333,
+    remoteForwardPort: 23433,
     detectedRemoteNodeBin: "/opt/homebrew/bin/node",
     detectedRemoteNodeVersion: "v22.1.0",
     detectedRemoteNodeSource: "profile",
@@ -147,7 +147,7 @@ test("resolveRemoteNodeBin can verify a cached path and fall back when stale", a
   const profile = {
     id: "p1",
     host: "pi",
-    remoteForwardPort: 23333,
+    remoteForwardPort: 23433,
     detectedRemoteNodeBin: "/stale/node",
     detectedRemoteNodeVersion: "v20.10.0",
     detectedRemoteNodeSource: "profile",
@@ -173,7 +173,7 @@ test("resolveRemoteNodeBin can verify a cached path and fall back when stale", a
 
 test("resolveRemoteNodeBin reports a helpful failure when probe exits non-zero", async () => {
   clearRemoteNodeCache();
-  const profile = { id: "p1", host: "pi", remoteForwardPort: 23333 };
+  const profile = { id: "p1", host: "pi", remoteForwardPort: 23433 };
   const { spawn } = makeRecordingSpawn([{ code: 127, stderr: "sh: node: command not found" }]);
   const resolved = await resolveRemoteNodeBin({ profile, spawn, buildSshArgs });
   assert.equal(resolved.ok, false);

@@ -11,7 +11,7 @@ function checkLocalServer(serverApi) {
       status: "fail",
       level: "critical",
       detail: "Local server is not listening",
-      textHint: "Restart Clawd. If the issue persists, check ~/.clawd/ permissions.",
+      textHint: "Restart Clawd. If the issue persists, check ~/.pomeranian/ permissions.",
       runtime: status,
       fixAction: { type: "restart-clawd" },
     };

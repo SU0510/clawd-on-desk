@@ -22,21 +22,21 @@ afterEach(() => {
 describe("server-config helpers", () => {
   it("clearRuntimeConfig removes runtime.json when present", () => {
     const tmpHome = makeTempHome();
-    const runtimeDir = path.join(tmpHome, ".clawd");
+    const runtimeDir = path.join(tmpHome, ".pomeranian");
     fs.mkdirSync(runtimeDir, { recursive: true });
     const runtimePath = path.join(runtimeDir, "runtime.json");
-    fs.writeFileSync(runtimePath, JSON.stringify({ app: "clawd-on-desk", port: 23333 }));
+    fs.writeFileSync(runtimePath, JSON.stringify({ app: "pomeranian-on-desk", port: 23433 }));
 
     assert.strictEqual(serverConfig.clearRuntimeConfig(runtimePath), true);
     assert.strictEqual(fs.existsSync(runtimePath), false);
   });
 
   it("splitPortCandidates prioritizes preferred and runtime ports", () => {
-    const result = serverConfig.splitPortCandidates(23335, { runtimePort: 23334 });
-    assert.deepStrictEqual(result.direct, [23335, 23334]);
-    assert.ok(result.fallback.includes(23333));
-    assert.ok(!result.fallback.includes(23334));
-    assert.ok(!result.fallback.includes(23335));
+    const result = serverConfig.splitPortCandidates(23435, { runtimePort: 23434 });
+    assert.deepStrictEqual(result.direct, [23435, 23434]);
+    assert.ok(result.fallback.includes(23433));
+    assert.ok(!result.fallback.includes(23434));
+    assert.ok(!result.fallback.includes(23435));
   });
 
   it("probePort recognizes signed Clawd responses", async () => {
@@ -48,7 +48,7 @@ describe("server-config helpers", () => {
         destroy() {},
       };
 
-      serverConfig.probePort(23337, 100, (ok) => {
+      serverConfig.probePort(23437, 100, (ok) => {
         try {
           assert.strictEqual(ok, true);
           resolve();
@@ -58,7 +58,7 @@ describe("server-config helpers", () => {
       }, {
         httpGet(_options, onResponse) {
           const res = {
-            headers: { "x-clawd-server": "clawd-on-desk" },
+            headers: { "x-clawd-server": "pomeranian-on-desk" },
             setEncoding() {},
             on(event, handler) {
               if (event === "data") handler("");
@@ -352,23 +352,23 @@ describe("server-config helpers", () => {
         JSON.stringify({ state: "idle" }),
         {
           timeoutMs: 50,
-          preferredPort: 23335,
-          runtimePort: 23334,
+          preferredPort: 23435,
+          runtimePort: 23434,
           probePort(port, _timeoutMs, cb) {
             probes.push(port);
-            cb(port === 23336);
+            cb(port === 23436);
           },
           postStateToPort(port, _payload, _timeoutMs, cb) {
             posts.push(port);
-            cb(port === 23336, port);
+            cb(port === 23436, port);
           },
         },
         (ok, port) => {
           try {
             assert.strictEqual(ok, true);
-            assert.strictEqual(port, 23336);
-            assert.deepStrictEqual(posts, [23335, 23334, 23336]);
-            assert.deepStrictEqual(probes, [23333, 23336]);
+            assert.strictEqual(port, 23436);
+            assert.deepStrictEqual(posts, [23435, 23434, 23436]);
+            assert.deepStrictEqual(probes, [23433, 23436]);
             resolve();
           } catch (err) {
             reject(err);
@@ -386,7 +386,7 @@ describe("server-config helpers", () => {
         JSON.stringify({ state: "thinking" }),
         {
           timeoutMs: 100,
-          preferredPort: 23333,
+          preferredPort: 23433,
           env: { CLAWD_REMOTE: "1" },
           postStateToPort(port, _payload, timeoutMs, cb) {
             timeouts.push(timeoutMs);
@@ -396,7 +396,7 @@ describe("server-config helpers", () => {
         (ok, port) => {
           try {
             assert.strictEqual(ok, true);
-            assert.strictEqual(port, 23333);
+            assert.strictEqual(port, 23433);
             assert.deepStrictEqual(timeouts, [serverConfig.REMOTE_HOOK_HTTP_TIMEOUT_MS]);
             resolve();
           } catch (err) {
@@ -415,7 +415,7 @@ describe("server-config helpers", () => {
         JSON.stringify({ state: "working" }),
         {
           timeoutMs: 100,
-          preferredPort: 23333,
+          preferredPort: 23433,
           remote: true,
           postStateToPort(port, _payload, timeoutMs, cb) {
             timeouts.push(timeoutMs);
@@ -425,7 +425,7 @@ describe("server-config helpers", () => {
         (ok, port) => {
           try {
             assert.strictEqual(ok, true);
-            assert.strictEqual(port, 23333);
+            assert.strictEqual(port, 23433);
             assert.deepStrictEqual(timeouts, [serverConfig.REMOTE_HOOK_HTTP_TIMEOUT_MS]);
             resolve();
           } catch (err) {
@@ -444,7 +444,7 @@ describe("server-config helpers", () => {
         JSON.stringify({ state: "working" }),
         {
           timeoutMs: 100,
-          preferredPort: 23333,
+          preferredPort: 23433,
           remote: false,
           env: { CLAWD_REMOTE: "1" },
           postStateToPort(port, _payload, timeoutMs, cb) {
@@ -455,7 +455,7 @@ describe("server-config helpers", () => {
         (ok, port) => {
           try {
             assert.strictEqual(ok, true);
-            assert.strictEqual(port, 23333);
+            assert.strictEqual(port, 23433);
             assert.deepStrictEqual(timeouts, [100]);
             resolve();
           } catch (err) {
@@ -503,12 +503,12 @@ describe("server-config helpers", () => {
         JSON.stringify({ tool_name: "bash" }),
         {
           probeTimeoutMs: 100,
-          preferredPort: 23335,
+          preferredPort: 23435,
           remote: true,
           discoverClawdPort(options, cb) {
             capturedTimeout = options.timeoutMs;
             capturedPreferredPort = options.preferredPort;
-            cb(23335);
+            cb(23435);
           },
           postPermissionToPort(port, _payload, _timeoutMs, cb) {
             cb(true, port, "{}", 200);
@@ -517,8 +517,8 @@ describe("server-config helpers", () => {
         (ok, port) => {
           try {
             assert.strictEqual(ok, true);
-            assert.strictEqual(port, 23335);
-            assert.strictEqual(capturedPreferredPort, 23335);
+            assert.strictEqual(port, 23435);
+            assert.strictEqual(capturedPreferredPort, 23435);
             assert.strictEqual(capturedTimeout, serverConfig.REMOTE_HOOK_HTTP_TIMEOUT_MS);
             resolve();
           } catch (err) {

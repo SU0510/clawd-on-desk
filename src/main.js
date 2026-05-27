@@ -1,6 +1,8 @@
 const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, dialog, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
+
+app.setName("pomeranian-on-desk");
 const {
   applyWindowsAppUserModelId,
   shouldOpenSettingsWindowFromArgv,
@@ -2020,10 +2022,37 @@ const _dockWalk = createDockWalk({
   applyState,
   syncHitWin,
   sendToRenderer,
+  sendToHitWin,
   detectWindowAtPoint: dockWalkDetect.detectWindowAtPoint,
   getWindowBounds: dockWalkDetect.getWindowBounds,
   getWindowVisibility: dockWalkDetect.getWindowVisibility,
   setDockWalkActive: (v) => _state.setDockWalkActive(v),
+  getOwnWindowIds: () => {
+    const ids = new Set();
+    for (const bw of BrowserWindow.getAllWindows()) {
+      try {
+        const handle = bw.getNativeWindowHandle();
+        if (handle && handle.length >= 8) {
+          // On Windows, HWND is the first pointer-sized value
+          // On macOS, this is an NSView pointer (PID-based filtering is used instead)
+          ids.add(handle.readUInt32LE(0));
+        }
+      } catch (_) {}
+    }
+    return ids;
+  },
+  expandHitWinFullScreen: () => {
+    if (hitWin && !hitWin.isDestroyed()) {
+      const display = screen.getPrimaryDisplay();
+      const { x, y, width, height } = display.workArea;
+      hitWin.setBounds({ x, y, width, height });
+      hitWin.setShape([{ x: 0, y: 0, width, height }]);
+    }
+  },
+  restoreHitWinSize: () => {
+    petWindowRuntime.syncHitWin();
+  },
+  getDetectHint: () => translate("dockDetectHint"),
 });
 const { enterMiniMode, exitMiniMode, enterMiniViaMenu, miniPeekIn, miniPeekOut,
         checkMiniModeSnap, cancelMiniTransition, animateWindowX, animateWindowParabola } = _mini;
@@ -2091,7 +2120,7 @@ app.on("open-url", (event, url) => {
   codexPetMain.enqueueImportUrl(url);
 });
 
-const gotTheLock = app.requestSingleInstanceLock();
+const gotTheLock = app.requestSingleInstanceLock("pomeranian-on-desk");
 if (!gotTheLock) {
   if (process.argv.includes(REGISTER_PROTOCOL_DEV_ARG)) {
     const protocolRegistered = codexPetMain.registerProtocolClient();

@@ -846,7 +846,7 @@ function isPiManagedMarker(value) {
 
 function checkPiExtensionMode(descriptor, options) {
   const extensionDir = descriptor.configPath;
-  const markerPath = path.join(extensionDir, descriptor.markerFile || ".clawd-managed.json");
+  const markerPath = path.join(extensionDir, descriptor.markerFile || ".pomeranian-managed.json");
   const extensionPath = path.join(extensionDir, descriptor.marker || "index.ts");
   const corePath = path.join(extensionDir, descriptor.coreFile || "pi-extension-core.js");
 

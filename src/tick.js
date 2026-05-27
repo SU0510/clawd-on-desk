@@ -183,7 +183,9 @@ function runMainTickOnce() {
 
     // Skip expensive native IPC calls (getCursorScreenPoint, getBounds) when
     // cursor tracking is not needed — saves ~20 calls/sec to the OS layer.
-    const happyNow = ctx.currentState === "happy" && !ctx.idlePaused; const needsCursorPoll = idleNow || miniIdleNow || ctx.miniMode || happyNow;
+    const happyNow = ctx.currentState === "happy" && !ctx.idlePaused;
+	const dockWalkNow = ctx.isDockWalkActive && ctx.isDockWalkActive();
+	const needsCursorPoll = idleNow || miniIdleNow || ctx.miniMode || happyNow || dockWalkNow;
     if (!needsCursorPoll) return nextDelay();
 
     const cursor = screen.getCursorScreenPoint();
