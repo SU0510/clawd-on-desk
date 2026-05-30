@@ -406,11 +406,17 @@ module.exports = function initDockWalk(ctx) {
   }
 
   // ── Position sync using relativeX ───────────────────────────────────────
+// DOCK_LIE_WALK_Y_OFFSET: shift the pet lower for lie/walk states so it
+// visually overlaps the window edge more (paws on the sill). Happy keeps
+// the original edge-aligned position.
+const DOCK_LIE_WALK_Y_OFFSET = 20;
+
   function syncPosition() {
     if (!docked || !targetBounds) return;
     const size = ctx.getCurrentPixelSize();
     const newPetX = targetBounds.x + targetBounds.width * relativeX - size.width / 2;
-    const newPetY = targetBounds.y - size.height;
+  const yOffset = (dockState === "lie" || dockState === "walk") ? DOCK_LIE_WALK_Y_OFFSET : 0;
+  const newPetY = targetBounds.y - size.height + yOffset;
 
     // Clamp within window bounds
     const clampedX = Math.max(

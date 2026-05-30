@@ -196,7 +196,7 @@ describe("dock-walk state machine", () => {
     assert.ok(positions.length > 0, "expected position to be applied");
     const lastPos = positions[positions.length - 1];
     assert.strictEqual(lastPos.x, 10);
-    assert.strictEqual(lastPos.y, -180);
+    assert.strictEqual(lastPos.y, -160);  // lie state: -180 + 20 offset
   });
 });
 
