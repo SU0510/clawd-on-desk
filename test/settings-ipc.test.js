@@ -136,13 +136,6 @@ function createHarness(overrides = {}) {
     getThemeMetadata: (themeId) => ({ name: themeId }),
     ensureUserThemesDir: () => path.join(os.tmpdir(), "clawd-user-themes"),
   };
-  const codexPetMain = overrides.codexPetMain || {
-    decorateThemeMetadata: (theme) => theme,
-    refreshFromSettings: () => ({ status: "ok", refreshed: true }),
-    openCodexPetsDir: () => ({ status: "ok", opened: true }),
-    importCodexPetZip: (event) => ({ status: "ok", sender: event.sender }),
-    removeCodexPet: (themeId) => ({ status: "ok", removed: themeId }),
-  };
   const dialog = overrides.dialog || {
     showOpenDialog: async () => ({ canceled: true }),
     showMessageBox: async () => ({ response: 1 }),
@@ -177,8 +170,7 @@ function createHarness(overrides = {}) {
     path: overrides.path || path,
     settingsController,
     themeLoader,
-    codexPetMain,
-    getSettingsWindow: () => ({ id: "settings-window" }),
+      getSettingsWindow: () => ({ id: "settings-window" }),
     getActiveTheme: () => activeTheme,
     getLang: overrides.getLang || (() => "en"),
     settingsSizePreviewSession,
@@ -187,8 +179,7 @@ function createHarness(overrides = {}) {
     getDoNotDisturb: overrides.getDoNotDisturb || (() => false),
     getSoundMuted: overrides.getSoundMuted || (() => false),
     getSoundVolume: overrides.getSoundVolume || (() => 0.4),
-    getAllAgents: overrides.getAllAgents || (() => []),
-    checkForUpdates: (manual) => calls.push(["checkForUpdates", manual]),
+      checkForUpdates: (manual) => calls.push(["checkForUpdates", manual]),
     aboutHeroSvgPath: overrides.aboutHeroSvgPath || path.join(__dirname, "missing-about-hero.svg"),
     now: overrides.now || (() => 12345),
   });
@@ -203,7 +194,6 @@ test("settings IPC registers owned channels and leaves animation override channe
   assert.ok(ipcMain.handlers.has("settings:list-themes"));
   assert.ok(ipcMain.handlers.has("settings:open-user-themes-dir"));
   assert.ok(ipcMain.handlers.has("settings:import-user-theme-zip"));
-  assert.ok(ipcMain.handlers.has("settings:refresh-codex-pets"));
   assert.ok(!ipcMain.listeners.has("settings:open-dashboard"));
   assert.ok(!ipcMain.handlers.has("settings:getShortcutFailures"));
   assert.ok(!ipcMain.handlers.has("settings:enterShortcutRecording"));
@@ -258,72 +248,6 @@ test("settings IPC delegates controller and size preview handlers", async () => 
     ["sizeBegin"],
     ["sizePreview", "P:35"],
     ["sizeEnd", "P:35"],
-  ]);
-});
-
-test("settings IPC delegates Codex Pet theme channels and decorates metadata", async () => {
-  const codexCalls = [];
-  const { ipcMain } = createHarness({
-    activeTheme: { _id: "imported-pet", sounds: {} },
-    themeLoader: {
-      getPreviewSoundUrl: () => null,
-      getSoundOverridesDir: () => null,
-      getSoundUrl: () => null,
-      listThemesWithMetadata: () => [
-        { id: "clawd", name: "Clawd" },
-        { id: "imported-pet", name: "Imported Pet" },
-      ],
-      getThemeMetadata: () => null,
-    },
-    codexPetMain: {
-      decorateThemeMetadata: (theme) => ({
-        ...theme,
-        managedCodexPet: theme.id === "imported-pet",
-      }),
-      refreshFromSettings: () => {
-        codexCalls.push("refresh");
-        return { status: "ok", refreshed: true };
-      },
-      openCodexPetsDir: () => {
-        codexCalls.push("open-dir");
-        return { status: "ok", opened: true };
-      },
-      importCodexPetZip: (event) => {
-        codexCalls.push(["import", event.sender]);
-        return { status: "ok", imported: true };
-      },
-      removeCodexPet: (themeId) => {
-        codexCalls.push(["remove", themeId]);
-        return { status: "ok", removed: themeId };
-      },
-    },
-  });
-
-  assert.deepStrictEqual(await ipcMain.invoke("settings:list-themes"), [
-    { id: "clawd", name: "Clawd", active: false, managedCodexPet: false },
-    { id: "imported-pet", name: "Imported Pet", active: true, managedCodexPet: true },
-  ]);
-  assert.deepStrictEqual(await ipcMain.invoke("settings:refresh-codex-pets"), {
-    status: "ok",
-    refreshed: true,
-  });
-  assert.deepStrictEqual(await ipcMain.invoke("settings:open-codex-pets-dir"), {
-    status: "ok",
-    opened: true,
-  });
-  assert.deepStrictEqual(await ipcMain.invoke("settings:import-codex-pet-zip"), {
-    status: "ok",
-    imported: true,
-  });
-  assert.deepStrictEqual(await ipcMain.invoke("settings:remove-codex-pet", "imported-pet"), {
-    status: "ok",
-    removed: "imported-pet",
-  });
-  assert.deepStrictEqual(codexCalls, [
-    "refresh",
-    "open-dir",
-    ["import", "sender-web-contents"],
-    ["remove", "imported-pet"],
   ]);
 });
 
@@ -515,7 +439,7 @@ test("settings IPC previews sound only when not muted or in DND", async () => {
   });
 });
 
-test("settings IPC serves agent/about/update/external and remove-theme dialog helpers", async () => {
+test("settings IPC serves about/update/external and remove-theme dialog helpers", async () => {
   const root = makeTempDir();
   try {
     const heroSvgPath = path.join(root, "hero.svg");
@@ -546,9 +470,6 @@ test("settings IPC serves agent/about/update/external and remove-theme dialog he
     });
 
     assert.strictEqual(await ipcMain.invoke("settings:get-preview-sound-url"), "file:///preview.mp3");
-    assert.deepStrictEqual(await ipcMain.invoke("settings:list-agents"), [
-      { id: "codex", name: "Codex", eventSource: "hook", capabilities: { permission: true } },
-    ]);
     assert.deepStrictEqual(await ipcMain.invoke("settings:get-about-info"), {
       version: "1.2.3",
       repoUrl: "https://github.com/rullerzhou-afk/clawd-on-desk",

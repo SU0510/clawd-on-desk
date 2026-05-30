@@ -95,34 +95,8 @@ function findRecentMatchingFiles(options = {}) {
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
-function summarizeActivity(agentId, files) {
-  if (!Array.isArray(files) || !files.length) return null;
-  return {
-    agentId,
-    source: "file-mtime",
-    count: files.length,
-    latestMtime: Math.max(...files.map((file) => file.mtimeMs).filter(Number.isFinite)),
-  };
-}
-
-function scanCodexMtimeActivity(options = {}) {
-  const pathApi = options.path || path;
-  const homeDir = options.homeDir || os.homedir();
-  const rootDir = pathApi.join(homeDir, ".codex", "sessions");
-  const files = findRecentMatchingFiles({
-    ...options,
-    rootDir,
-    maxDepth: 4,
-    maxEntries: 1500,
-    predicate: (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"),
-  });
-  return summarizeActivity("codex", files);
-}
-
-function scanFileMtimeActivity(options = {}) {
-  return [
-    scanCodexMtimeActivity(options),
-  ].filter(Boolean);
+function scanFileMtimeActivity(_options = {}) {
+  return [];
 }
 
 function eventSummary(events) {

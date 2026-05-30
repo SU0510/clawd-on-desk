@@ -109,7 +109,7 @@ module.exports = function initDockWalk(ctx) {
 
       targetHandle = result.handle;
       targetBounds = result.bounds;
-      relativeX = 0.5; // start centered on window
+      relativeX = Math.max(0, Math.min(1, (screenX - result.bounds.x) / result.bounds.width));
       dock();
       return true;
     } catch (err) {
@@ -410,7 +410,7 @@ module.exports = function initDockWalk(ctx) {
     if (!docked || !targetBounds) return;
     const size = ctx.getCurrentPixelSize();
     const newPetX = targetBounds.x + targetBounds.width * relativeX - size.width / 2;
-    const newPetY = targetBounds.y - size.height / 2;
+    const newPetY = targetBounds.y - size.height;
 
     // Clamp within window bounds
     const clampedX = Math.max(

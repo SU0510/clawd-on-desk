@@ -195,8 +195,8 @@ describe("dock-walk state machine", () => {
     // newPetY = 20 - 200/2 = -80
     assert.ok(positions.length > 0, "expected position to be applied");
     const lastPos = positions[positions.length - 1];
-    assert.strictEqual(lastPos.x, 310);
-    assert.strictEqual(lastPos.y, -80);
+    assert.strictEqual(lastPos.x, 10);
+    assert.strictEqual(lastPos.y, -180);
   });
 });
 

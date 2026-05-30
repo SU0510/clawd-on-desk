@@ -1,7 +1,7 @@
 {
   "name": "clawd-on-desk",
   "version": "0.8.0",
-  "description": "A desktop pet that reacts to your Claude Code sessions in real-time.",
+  "description": "A desktop pet that lives on your screen.",
   "main": "src/main.js",
   "scripts": {
     "start": "node scripts/ensure-sidecar-binaries.js && node launch.js",
@@ -22,31 +22,12 @@
     "prebuild:linux": "node scripts/verify-sidecar-binaries.js",
     "prebuild:all": "node scripts/verify-sidecar-binaries.js",
     "test": "node test/run-tests.js",
-    "create-theme": "node scripts/create-theme.js",
-    "export-agent-icons": "node scripts/export-agent-icons.js",
-    "install:claude-hooks": "node hooks/install.js",
-    "uninstall:claude-hooks": "node hooks/uninstall.js",
-    "install:gemini-hooks": "node hooks/gemini-install.js",
-    "install:cursor-hooks": "node hooks/cursor-install.js",
-    "install:kiro-hooks": "node hooks/kiro-install.js",
-    "install:kimi-hooks": "node hooks/kimi-install.js",
-    "install:pi-extension": "node hooks/pi-install.js",
-    "uninstall:pi-extension": "node hooks/pi-install.js --uninstall",
-    "install:openclaw-plugin": "node hooks/openclaw-install.js",
-    "uninstall:openclaw-plugin": "node hooks/openclaw-install.js --uninstall",
-    "install:codex-hooks": "node hooks/codex-install.js",
-    "uninstall:codex-hooks": "node hooks/codex-install.js --uninstall",
-    "install:codex-debug-hooks": "node hooks/codex-debug-install.js",
-    "uninstall:codex-debug-hooks": "node hooks/codex-debug-install.js --uninstall",
-    "install:hermes-plugin": "node hooks/hermes-install.js",
-    "uninstall:hermes-plugin": "node hooks/hermes-install.js --uninstall",
-    "register-protocol:dev": "node launch.js --register-protocol"
+    "create-theme": "node scripts/create-theme.js"
   },
   "keywords": [
-    "clawd",
     "desktop-pet",
     "electron",
-    "claude-code"
+    "pomeranian"
   ],
   "author": "rullerzhou-afk",
   "license": "AGPL-3.0-only",
@@ -54,14 +35,6 @@
   "build": {
     "appId": "com.clawd.on-desk",
     "productName": "Clawd on Desk",
-    "protocols": [
-      {
-        "name": "Clawd Import Protocol",
-        "schemes": [
-          "clawd"
-        ]
-      }
-    ],
     "mac": {
       "icon": "assets/icon.png",
       "target": [
@@ -125,29 +98,19 @@
       "src/**/*",
       "assets/icon.ico",
       "assets/icons/**/*",
-      "assets/icons/agents/**/*",
       "assets/svg/**/*",
       "assets/sounds/**/*",
       "assets/tray-icon*.png",
-      "hooks/**/*",
-      "extensions/**/*",
-      "agents/**/*",
       "themes/**/*"
     ],
     "asarUnpack": [
       "assets/svg/**/*",
-      "hooks/**/*",
-      "extensions/**/*",
       "themes/**/*"
     ],
     "extraResources": [
       {
         "from": "assets/icon.ico",
         "to": "icon.ico"
-      },
-      {
-        "from": "bin/cc-connect-clawd",
-        "to": "sidecars/cc-connect-clawd"
       }
     ],
     "publish": [

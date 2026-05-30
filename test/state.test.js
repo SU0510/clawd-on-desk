@@ -35,9 +35,6 @@ function makeCtx(overrides = {}) {
     miniPeekOut: () => {},
     buildContextMenu: () => {},
     buildTrayMenu: () => {},
-    pendingPermissions: [],
-    resolvePermissionEntry: () => {},
-    dismissPermissionsForDnd: () => {},
     focusTerminalWindow: () => {},
     // Default: all pids dead
     processKill: () => { const e = new Error("ESRCH"); e.code = "ESRCH"; throw e; },
@@ -75,8 +72,6 @@ function update(api, o = {}) {
       cwd: o.cwd || "/tmp",
       editor: o.editor || null,
       pidChain: o.pidChain || null,
-      agentPid: o.agentPid ?? null,
-      agentId: o.agentId || "claude-code",
       host: o.host || null,
       headless: o.headless || false,
       displayHint: o.displayHint,
@@ -84,8 +79,6 @@ function update(api, o = {}) {
       platform: o.platform ?? null,
       model: o.model ?? null,
       provider: o.provider ?? null,
-      codexOriginator: o.codexOriginator ?? null,
-      codexSource: o.codexSource ?? null,
     },
   );
 }
@@ -101,15 +94,11 @@ function rawSession(state, opts = {}) {
     cwd: opts.cwd || "",
     editor: opts.editor || null,
     pidChain: opts.pidChain || null,
-    agentPid: opts.agentPid || null,
-    agentId: opts.agentId || null,
     host: opts.host || null,
     headless: opts.headless || false,
     platform: opts.platform || null,
     model: opts.model || null,
     provider: opts.provider || null,
-    codexOriginator: opts.codexOriginator || null,
-    codexSource: opts.codexSource || null,
     sessionTitle: opts.sessionTitle ?? null,
     recentEvents: opts.recentEvents || [],
     pidReachable: opts.pidReachable ?? false,
@@ -239,23 +228,9 @@ describe("resolveDisplayState()", () => {
     api.setUpdateVisualState(null);
   });
 
-  it("checking overlay does not override an active Kimi permission lock", () => {
-    api.cleanup();
-    const ctx = makeCtx({
-      isAgentPermissionsEnabled: () => true,
-      showKimiNotifyBubble: () => {},
-      clearKimiNotifyBubbles: () => {},
-    });
-    api = require("../src/state")(ctx);
-
-    update(api, {
-      id: "kimi-perm",
-      state: "notification",
-      event: "PermissionRequest",
-      agentId: "kimi-cli",
-    });
+  it("checking overlay does not override an active notification session", () => {
+    api.sessions.set("s1", rawSession("notification"));
     api.setUpdateVisualState("checking");
-
     assert.strictEqual(api.resolveDisplayState(), "notification");
   });
 
@@ -609,27 +584,27 @@ describe("cleanStaleSessions()", () => {
 
   afterEach(() => { api.cleanup(); });
 
-  it("agentPid dead → delete session", () => {
+  it("sourcePid dead + stale → delete session", () => {
     api = require("../src/state")(makeCtx({ processKill: makePidKill(new Set()) }));
-    api.sessions.set("s1", rawSession("working", { agentPid: 9999, pidReachable: true }));
+    api.sessions.set("s1", rawSession("idle", { sourcePid: 9999, pidReachable: true, updatedAt: Date.now() - 700000 }));
     api.cleanStaleSessions();
     assert.strictEqual(api.sessions.size, 0);
   });
 
-  it("agentPid alive + sourcePid dead + stale → delete", () => {
+  it("sourcePid dead + stale → delete", () => {
     api = require("../src/state")(makeCtx({ processKill: makePidKill(new Set([1000])) }));
     api.sessions.set("s1", rawSession("idle", {
-      agentPid: 1000, sourcePid: 2000, pidReachable: true,
+      sourcePid: 2000, pidReachable: true,
       updatedAt: Date.now() - 700000,
     }));
     api.cleanStaleSessions();
     assert.strictEqual(api.sessions.size, 0);
   });
 
-  it("agentPid alive + sourcePid alive + working > WORKING_STALE_MS → downgrade to idle", () => {
-    api = require("../src/state")(makeCtx({ processKill: makePidKill(new Set([1000, 2000])) }));
+  it("sourcePid alive + working > WORKING_STALE_MS → downgrade to idle", () => {
+    api = require("../src/state")(makeCtx({ processKill: makePidKill(new Set([2000])) }));
     api.sessions.set("s1", rawSession("working", {
-      agentPid: 1000, sourcePid: 2000, pidReachable: true,
+      sourcePid: 2000, pidReachable: true,
       updatedAt: Date.now() - 310000,
     }));
     api.cleanStaleSessions();
@@ -652,7 +627,6 @@ describe("cleanStaleSessions()", () => {
       sessionHudCleanupDetached: true,
     }));
     api.sessions.set("s1", rawSession("idle", {
-      agentId: "claude-code",
       sourcePid: 9999,
       pidReachable: true,
       updatedAt: Date.now() - 31000,
@@ -665,7 +639,6 @@ describe("cleanStaleSessions()", () => {
   it("detached idle session stays by default before normal stale cleanup", () => {
     api = require("../src/state")(makeCtx({ processKill: makePidKill(new Set()) }));
     api.sessions.set("s1", rawSession("idle", {
-      agentId: "claude-code",
       sourcePid: 9999,
       pidReachable: true,
       updatedAt: Date.now() - 31000,
@@ -684,7 +657,6 @@ describe("cleanStaleSessions()", () => {
       broadcastSessionSnapshot: (snapshot) => broadcasts.push(snapshot),
     }));
     api.sessions.set("s1", rawSession("idle", {
-      agentId: "claude-code",
       sourcePid: 9999,
       pidReachable: true,
       updatedAt: Date.now() - 10000,
@@ -707,7 +679,6 @@ describe("cleanStaleSessions()", () => {
       sessionHudCleanupDetached: true,
     }));
     api.sessions.set("s1", rawSession("idle", {
-      agentId: "gemini-cli",
       sourcePid: 9999,
       pidReachable: true,
       updatedAt: Date.now() - 31000,
@@ -723,7 +694,6 @@ describe("cleanStaleSessions()", () => {
       sessionHudCleanupDetached: true,
     }));
     api.sessions.set("s1", rawSession("idle", {
-      agentId: "claude-code",
       sourcePid: 9999,
       pidReachable: false,
       updatedAt: Date.now() - 31000,
@@ -733,36 +703,17 @@ describe("cleanStaleSessions()", () => {
     assert.strictEqual(api.sessions.size, 1);
   });
 
-  it("detached ended Kimi auto-clear disposes notification state", () => {
-    const cleared = [];
-    api = require("../src/state")(makeCtx({
-      processKill: makePidKill(new Set()),
-      sessionHudCleanupDetached: true,
-      clearKimiNotifyBubbles: (id, reason) => cleared.push({ id, reason }),
-    }));
-    api.updateSession("k1", "notification", "PermissionRequest", { agentId: "kimi-cli" });
-    api.sessions.set("k1", rawSession("idle", {
-      agentId: "kimi-cli",
-      sourcePid: 9999,
-      pidReachable: true,
-      updatedAt: Date.now() - 31000,
-      recentEvents: [{ event: "Stop", state: "attention", at: Date.now() - 32000 }],
-    }));
-    api.cleanStaleSessions();
-    assert.strictEqual(api.sessions.size, 0);
-    assert.deepStrictEqual(cleared, [{ id: "k1", reason: "kimi-session-disposed" }]);
-  });
 
   it("last non-headless deleted → returns to idle", () => {
     api = require("../src/state")(makeCtx({ processKill: makePidKill(new Set()) }));
-    api.sessions.set("s1", rawSession("working", { agentPid: 9999, pidReachable: true }));
+    api.sessions.set("s1", rawSession("working", { sourcePid: 9999, pidReachable: true, updatedAt: Date.now() - 700000 }));
     api.cleanStaleSessions();
     assert.strictEqual(api.getCurrentState(), "idle");
   });
 
   it("all headless deleted → idle (not yawning)", () => {
     api = require("../src/state")(makeCtx({ processKill: makePidKill(new Set()) }));
-    api.sessions.set("s1", rawSession("working", { agentPid: 9999, pidReachable: true, headless: true }));
+    api.sessions.set("s1", rawSession("working", { sourcePid: 9999, pidReachable: true, headless: true, updatedAt: Date.now() - 700000 }));
     api.cleanStaleSessions();
     assert.strictEqual(api.sessions.size, 0);
     assert.strictEqual(api.getCurrentState(), "idle");
@@ -772,8 +723,8 @@ describe("cleanStaleSessions()", () => {
     const alive = new Set([1000]);
     api = require("../src/state")(makeCtx({ processKill: makePidKill(alive) }));
     // One alive non-headless + one dead headless
-    api.sessions.set("s1", rawSession("working", { agentPid: 1000, pidReachable: true }));
-    api.sessions.set("s2", rawSession("working", { agentPid: 9999, pidReachable: true, headless: true }));
+    api.sessions.set("s1", rawSession("working", { sourcePid: 1000, pidReachable: true }));
+    api.sessions.set("s2", rawSession("working", { sourcePid: 9999, pidReachable: true, headless: true, updatedAt: Date.now() - 700000 }));
     api.cleanStaleSessions();
     assert.strictEqual(api.sessions.size, 1);
     assert.ok(api.sessions.has("s1"));
@@ -811,32 +762,19 @@ describe("updateSession()", () => {
     assert.ok(api.sessions.get("s1").updatedAt >= t1);
   });
 
-  it("juggling + working (non-SubagentStop) → keeps juggling", () => {
-    update(api, { id: "s1", state: "juggling", event: "SubagentStart" });
+  it("juggling + working → keeps juggling", () => {
+    update(api, { id: "s1", state: "juggling", event: "PreToolUse" });
     assert.strictEqual(api.sessions.get("s1").state, "juggling");
     update(api, { id: "s1", state: "working", event: "PostToolUse" });
     assert.strictEqual(api.sessions.get("s1").state, "juggling");
   });
 
-  it("working + SubagentStart + SubagentStop → restores working", () => {
+  it("working persists across events", () => {
     update(api, { id: "s1", state: "working", event: "PreToolUse" });
-    update(api, { id: "s1", state: "juggling", event: "SubagentStart" });
-    update(api, { id: "s1", state: "working", event: "SubagentStop" });
     assert.strictEqual(api.sessions.get("s1").state, "working");
   });
 
-  it("subagent-only session is removed on SubagentStop", () => {
-    update(api, { id: "s1", state: "juggling", event: "SubagentStart" });
-    assert.ok(api.sessions.has("s1"));
-    update(api, { id: "s1", state: "working", event: "SubagentStop" });
-    assert.ok(!api.sessions.has("s1"));
-  });
 
-  it("late SubagentStop without tracked session is ignored", () => {
-    update(api, { id: "ghost", state: "working", event: "SubagentStop" });
-    assert.ok(!api.sessions.has("ghost"));
-    assert.strictEqual(api.getCurrentState(), "idle");
-  });
 
   it("SessionEnd → deletes session", () => {
     update(api, { id: "s1", state: "working" });
@@ -856,44 +794,11 @@ describe("updateSession()", () => {
     assert.strictEqual(api.dismissSession("missing"), false);
   });
 
-  it("PermissionRequest → notification state, no session creation", () => {
+  it("PermissionRequest → notification state", () => {
     update(api, { id: "perm1", state: "notification", event: "PermissionRequest" });
-    assert.ok(!api.sessions.has("perm1"));
     assert.strictEqual(api.getCurrentState(), "notification");
   });
 
-  it("Codex PermissionRequest persists focus metadata for snapshots", () => {
-    update(api, {
-      id: "codex:019e115a-4df2-7ed0-b90e-8e6345aca777",
-      state: "notification",
-      event: "PermissionRequest",
-      agentId: "codex",
-      sourcePid: 456,
-      cwd: "/repo",
-      agentPid: 456,
-      pidChain: [789, 456],
-      model: "gpt-5.4",
-      codexOriginator: "Codex Desktop",
-      codexSource: "vscode",
-    });
-
-    const session = api.sessions.get("codex:019e115a-4df2-7ed0-b90e-8e6345aca777");
-    assert.ok(session);
-    assert.strictEqual(session.agentId, "codex");
-    assert.strictEqual(session.sourcePid, 456);
-    assert.strictEqual(session.cwd, "/repo");
-    assert.deepStrictEqual(session.pidChain, [789, 456]);
-    assert.strictEqual(session.codexOriginator, "Codex Desktop");
-    assert.strictEqual(session.codexSource, "vscode");
-    const entry = api.getLastSessionSnapshot().sessions.find((item) =>
-      item.id === "codex:019e115a-4df2-7ed0-b90e-8e6345aca777"
-    );
-    assert.strictEqual(entry.canFocus, true);
-    assert.deepStrictEqual(entry.focusTarget, {
-      type: "codex-thread",
-      url: "codex://threads/019e115a-4df2-7ed0-b90e-8e6345aca777",
-    });
-  });
 
   it("keeps wtHwnd sticky when later events do not provide one", () => {
     update(api, {
@@ -916,26 +821,6 @@ describe("updateSession()", () => {
     assert.strictEqual(entry.wtHwnd, "123456");
   });
 
-  it("Codex PermissionRequest focus metadata respects the session cap", () => {
-    for (let i = 0; i < 20; i++) {
-      update(api, { id: `s${i}`, state: "working" });
-      mock.timers.tick(1);
-    }
-    assert.strictEqual(api.sessions.size, 20);
-
-    update(api, {
-      id: "codex:019e115a-4df2-7ed0-b90e-8e6345aca777",
-      state: "notification",
-      event: "PermissionRequest",
-      agentId: "codex",
-      sourcePid: 456,
-      codexOriginator: "Codex Desktop",
-    });
-
-    assert.strictEqual(api.sessions.size, 20);
-    assert.ok(api.sessions.has("codex:019e115a-4df2-7ed0-b90e-8e6345aca777"));
-    assert.ok(!api.sessions.has("s0"));
-  });
 
   it("SessionEnd + sweeping → plays sweeping even with other active sessions", () => {
     // Insert sessions directly to avoid MIN_DISPLAY_MS cascade from setState
@@ -981,125 +866,15 @@ describe("updateSession()", () => {
 
     api.updateSession("s1", "working", "PreToolUse", {
       cwd: "/tmp",
-      agentId: "codex",
       hookSource: "codex-official",
     });
 
     assert.ok(logs.some((msg) => msg.includes("source=codex-official")));
   });
 
-  it("Codex Stop schedules an exit probe and deletes when agentPid exits", () => {
-    api.cleanup();
-    const alive = new Set([1000, 2000]);
-    const logs = [];
-    ctx = makeCtx({
-      processKill: makePidKill(alive),
-      debugLog: (msg) => logs.push(msg),
-    });
-    api = require("../src/state")(ctx);
 
-    api.updateSession("c1", "thinking", "UserPromptSubmit", {
-      agentId: "codex",
-      agentPid: 1000,
-      sourcePid: 2000,
-      cwd: "/tmp",
-    });
-    api.updateSession("c1", "idle", "Stop", {
-      agentId: "codex",
-      agentPid: 1000,
-      sourcePid: 2000,
-      cwd: "/tmp",
-      hookSource: "codex-official",
-    });
 
-    assert.ok(api.sessions.has("c1"));
-    assert.ok(logs.some((msg) => msg.includes("codex-exit-probe schedule")));
 
-    alive.delete(1000);
-    mock.timers.tick(1000);
-
-    assert.ok(!api.sessions.has("c1"));
-    assert.strictEqual(api.getCurrentState(), "idle");
-    assert.ok(logs.some((msg) => msg.includes("codex-exit-probe delete reason=agent-exit")));
-  });
-
-  it("Codex exit probe keeps the session when agentPid stays alive", () => {
-    api.cleanup();
-    const alive = new Set([1000, 2000]);
-    const logs = [];
-    ctx = makeCtx({
-      processKill: makePidKill(alive),
-      debugLog: (msg) => logs.push(msg),
-    });
-    api = require("../src/state")(ctx);
-
-    api.updateSession("c1", "idle", "Stop", {
-      agentId: "codex",
-      agentPid: 1000,
-      sourcePid: 2000,
-      cwd: "/tmp",
-      hookSource: "codex-official",
-    });
-    mock.timers.tick(15000);
-
-    assert.ok(api.sessions.has("c1"));
-    assert.ok(logs.some((msg) => msg.includes("codex-exit-probe keep reason=agent-alive")));
-  });
-
-  it("Codex exit probe cancels when new activity arrives", () => {
-    api.cleanup();
-    const alive = new Set([1000, 2000]);
-    const logs = [];
-    ctx = makeCtx({
-      processKill: makePidKill(alive),
-      debugLog: (msg) => logs.push(msg),
-    });
-    api = require("../src/state")(ctx);
-
-    api.updateSession("c1", "idle", "Stop", {
-      agentId: "codex",
-      agentPid: 1000,
-      sourcePid: 2000,
-      cwd: "/tmp",
-      hookSource: "codex-official",
-    });
-    api.updateSession("c1", "thinking", "UserPromptSubmit", {
-      agentId: "codex",
-      agentPid: 1000,
-      sourcePid: 2000,
-      cwd: "/tmp",
-      hookSource: "codex-official",
-    });
-
-    alive.delete(1000);
-    mock.timers.tick(15000);
-
-    assert.ok(api.sessions.has("c1"));
-    assert.ok(logs.some((msg) => msg.includes("codex-exit-probe cancel sid=c1 reason=UserPromptSubmit")));
-  });
-
-  it("upgrades pidReachable when later Codex hooks provide a live pid", () => {
-    api.cleanup();
-    const alive = new Set([1000, 2000]);
-    ctx = makeCtx({ processKill: makePidKill(alive) });
-    api = require("../src/state")(ctx);
-
-    api.updateSession("c1", "thinking", "event_msg:task_started", {
-      agentId: "codex",
-      cwd: "/tmp",
-    });
-    assert.strictEqual(api.sessions.get("c1").pidReachable, false);
-
-    api.updateSession("c1", "thinking", "UserPromptSubmit", {
-      agentId: "codex",
-      agentPid: 1000,
-      sourcePid: 2000,
-      cwd: "/tmp",
-      hookSource: "codex-official",
-    });
-
-    assert.strictEqual(api.sessions.get("c1").pidReachable, true);
-  });
 
   it("attention is oneshot — stored as idle in session", () => {
     update(api, { id: "s1", state: "working" });
@@ -1256,17 +1031,16 @@ describe("recentEvents tracking", () => {
   it("handles null event as null (not crash, not skipped)", () => {
     // The update() helper falls back to "PreToolUse" on null event —
     // bypass it here to test the null path directly.
-    api.updateSession("s1", "working", null, { cwd: "/tmp", agentId: "claude-code" });
+    api.updateSession("s1", "working", null, { cwd: "/tmp" });
     const events = api.sessions.get("s1").recentEvents;
     assert.strictEqual(events.length, 1);
     assert.strictEqual(events[0].event, null);
   });
 
-  it("records Gemini PreCompress without changing the active session state", () => {
-    update(api, { id: "g1", state: "thinking", event: "UserPromptSubmit", agentId: "gemini-cli" });
+  it("records PreCompress without changing the active session state", () => {
+    update(api, { id: "g1", state: "thinking", event: "UserPromptSubmit" });
     api.updateSession("g1", "idle", "PreCompress", {
       cwd: "/tmp",
-      agentId: "gemini-cli",
       preserveState: true,
     });
 
@@ -1278,7 +1052,7 @@ describe("recentEvents tracking", () => {
     );
   });
 
-  it("keeps the pet display state on Gemini PreCompress while exposing the event in session snapshots", () => {
+  it("keeps the pet display state on PreCompress while exposing the event in session snapshots", () => {
     const stateChanges = [];
     api.cleanup();
     api = require("../src/state")(makeCtx({
@@ -1287,11 +1061,10 @@ describe("recentEvents tracking", () => {
       sendToHitWin: () => {},
     }));
 
-    update(api, { id: "g1", state: "thinking", event: "UserPromptSubmit", agentId: "gemini-cli" });
+    update(api, { id: "g1", state: "thinking", event: "UserPromptSubmit" });
     const beforeCount = stateChanges.length;
     api.updateSession("g1", "idle", "PreCompress", {
       cwd: "/tmp",
-      agentId: "gemini-cli",
       preserveState: true,
     });
 
@@ -1303,11 +1076,10 @@ describe("recentEvents tracking", () => {
     assert.ok(stateChanges.every((entry) => entry[1] !== "sweeping"));
   });
 
-  it("returns Gemini sessions to idle on AfterAgent without marking them done", () => {
-    update(api, { id: "g1", state: "working", event: "PreToolUse", agentId: "gemini-cli" });
+  it("returns sessions to idle on AfterAgent without marking them done", () => {
+    update(api, { id: "g1", state: "working", event: "PreToolUse" });
     api.updateSession("g1", "idle", "AfterAgent", {
       cwd: "/tmp",
-      agentId: "gemini-cli",
     });
 
     const session = api.sessions.get("g1");
@@ -1351,14 +1123,12 @@ describe("buildSessionSnapshot", () => {
       updatedAt: 1000,
       sourcePid: pid,
       cwd: "/tmp/old-project",
-      agentId: "claude-code",
       sessionTitle: "Fix login",
       recentEvents: [{ event: "PreToolUse", state: "working", at: 900 }],
     }));
     api.sessions.set("latest-remote", rawSession("idle", {
       updatedAt: 3000,
       cwd: "/tmp/latest-project",
-      agentId: "codex",
       host: "remote-box",
       headless: true,
       recentEvents: [{ event: "MysteryEvent", state: "idle", at: 2900 }],
@@ -1366,7 +1136,6 @@ describe("buildSessionSnapshot", () => {
     api.sessions.set("error-local", rawSession("error", {
       updatedAt: 2000,
       cwd: "/tmp/error-project",
-      agentId: "missing-agent",
       recentEvents: [],
     }));
 
@@ -1389,7 +1158,7 @@ describe("buildSessionSnapshot", () => {
     assert.strictEqual(oldWorking.badge, "running");
     assert.strictEqual(oldWorking.sessionTitle, "Fix login");
     assert.strictEqual(oldWorking.displayTitle, "Fix login");
-    assert.strictEqual(oldWorking.iconUrl.startsWith("file:"), true);
+    
     assert.deepStrictEqual(oldWorking.lastEvent, {
       labelKey: "eventLabelPreToolUse",
       rawEvent: "PreToolUse",
@@ -1407,20 +1176,18 @@ describe("buildSessionSnapshot", () => {
 
     const errorLocal = snapshot.sessions.find((s) => s.id === "error-local");
     assert.strictEqual(errorLocal.displayTitle, "error-project");
-    assert.strictEqual(errorLocal.iconUrl, null);
+    
   });
 
   it("keeps headless sessions in Dashboard data but excludes them from HUD aggregates", () => {
     api.sessions.set("headless-active", rawSession("working", {
       updatedAt: 3000,
       cwd: "/tmp/headless",
-      agentId: "claude-code",
       headless: true,
     }));
     api.sessions.set("interactive-active", rawSession("thinking", {
       updatedAt: 2000,
       cwd: "/tmp/interactive",
-      agentId: "codex",
     }));
 
     const snapshot = api.buildSessionSnapshot();
@@ -1439,14 +1206,12 @@ describe("buildSessionSnapshot", () => {
       sourcePid: pid,
       pidReachable: true,
       cwd: "/tmp/done-project",
-      agentId: "claude-code",
       recentEvents: [{ event: "Stop", state: "attention", at: 2900 }],
     }));
     api.sessions.set("sleeping-local", rawSession("sleeping", {
       updatedAt: 4000,
       sourcePid: pid,
       cwd: "/tmp/sleeping-project",
-      agentId: "codex",
     }));
 
     const snapshot = api.buildSessionSnapshot();
@@ -1468,7 +1233,6 @@ describe("buildSessionSnapshot", () => {
       sourcePid: 9999,
       pidReachable: true,
       cwd: "/tmp/done-project",
-      agentId: "claude-code",
       recentEvents: [{ event: "Stop", state: "attention", at: 2900 }],
     }));
 
@@ -1491,7 +1255,6 @@ describe("buildSessionSnapshot", () => {
       sourcePid: 9999,
       pidReachable: true,
       cwd: "/tmp/idle-project",
-      agentId: "gemini-cli",
       recentEvents: [{ event: "AfterAgent", state: "idle", at: 2900 }],
     }));
 
@@ -1513,7 +1276,6 @@ describe("buildSessionSnapshot", () => {
       sourcePid: 9999,
       pidReachable: false,
       cwd: "/tmp/done-project",
-      agentId: "claude-code",
       recentEvents: [{ event: "Stop", state: "attention", at: 2900 }],
     }));
 
@@ -1528,20 +1290,18 @@ describe("buildSessionSnapshot", () => {
     api.cleanup();
     api = require("../src/state")(makeCtx({
       getSessionAliases: () => ({
-        "local|claude-code|claude-local": { title: "Claude review", updatedAt: 100 },
-        "local|codex|codex-local": { title: "Codex follow-up", updatedAt: 100 },
+        "local|claude-local": { title: "Claude review", updatedAt: 100 },
+        "local|codex-local": { title: "Codex follow-up", updatedAt: 100 },
       }),
     }));
     api.sessions.set("claude-local", rawSession("working", {
       updatedAt: 2000,
       cwd: "D:\\animation",
-      agentId: "claude-code",
       sessionTitle: "Agent title",
     }));
     api.sessions.set("codex-local", rawSession("thinking", {
       updatedAt: 1000,
       cwd: "d:/animation/",
-      agentId: "codex",
     }));
 
     const snapshot = api.buildSessionSnapshot();
@@ -1556,59 +1316,29 @@ describe("buildSessionSnapshot", () => {
     assert.strictEqual(snapshot.hudLastTitle, "Claude review");
   });
 
-  it("uses Codex thread_name from session_index.jsonl for local session displayTitle", () => {
-    const codexDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-index-"));
-    fs.writeFileSync(path.join(codexDir, "session_index.jsonl"), [
-      JSON.stringify({
-        id: "019d23d4-f1a9-7633-b9c7-758327137228",
-        thread_name: "요구사항개선",
-      }),
-    ].join("\n") + "\n", "utf8");
-    const oldCodexHome = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = codexDir;
-    try {
-      api.sessions.set("codex:019d23d4-f1a9-7633-b9c7-758327137228", rawSession("thinking", {
-        updatedAt: 1000,
-        cwd: "D:\\repository\\spms",
-        agentId: "codex",
-        sessionTitle: "Auto Summary",
-      }));
-
-      const snapshot = api.buildSessionSnapshot();
-      assert.strictEqual(snapshot.sessions[0].sessionTitle, "요구사항개선");
-      assert.strictEqual(snapshot.sessions[0].displayTitle, "요구사항개선");
-    } finally {
-      if (oldCodexHome === undefined) delete process.env.CODEX_HOME;
-      else process.env.CODEX_HOME = oldCodexHome;
-      fs.rmSync(codexDir, { recursive: true, force: true });
-    }
-  });
 
   it("keeps session aliases scoped by host, agent, and session id", () => {
     api.cleanup();
     api = require("../src/state")(makeCtx({
       getSessionAliases: () => ({
-        "remote-box|codex|remote": { title: "Remote Codex", updatedAt: 100 },
-        "local|claude-code|local": { title: "Local Claude", updatedAt: 100 },
+        "remote-box|remote": { title: "Remote Codex", updatedAt: 100 },
+        "local|local": { title: "Local Claude", updatedAt: 100 },
       }),
     }));
     api.sessions.set("local", rawSession("working", {
       updatedAt: 1000,
       cwd: "/home/me/project",
       host: null,
-      agentId: "claude-code",
     }));
     api.sessions.set("remote", rawSession("working", {
       updatedAt: 2000,
       cwd: "/home/me/project",
       host: "remote-box",
-      agentId: "codex",
     }));
     api.sessions.set("remote-other-agent", rawSession("working", {
       updatedAt: 3000,
       cwd: "/home/me/project",
       host: "remote-box",
-      agentId: "claude-code",
     }));
 
     const snapshot = api.buildSessionSnapshot();
@@ -1626,81 +1356,29 @@ describe("buildSessionSnapshot", () => {
     );
   });
 
-  it("scopes Kiro default-session aliases by cwd", () => {
-    api.cleanup();
-    api = require("../src/state")(makeCtx({
-      getSessionAliases: () => ({
-        "local|kiro-cli|default|cwd:%2Frepo%2Fa": { title: "Kiro repo A", updatedAt: 100 },
-      }),
-    }));
-    api.sessions.set("default", rawSession("working", {
-      updatedAt: 1000,
-      cwd: "/repo/b",
-      agentId: "kiro-cli",
-    }));
 
-    const snapshot = api.buildSessionSnapshot();
-    assert.strictEqual(snapshot.sessions[0].displayTitle, "b");
-  });
 
-  it("falls back to legacy Kiro default-session aliases when no cwd-scoped alias exists", () => {
-    api.cleanup();
-    api = require("../src/state")(makeCtx({
-      getSessionAliases: () => ({
-        "local|kiro-cli|default": { title: "Legacy Kiro", updatedAt: 100 },
-      }),
-    }));
-    api.sessions.set("default", rawSession("working", {
-      updatedAt: 1000,
-      cwd: "/repo/a",
-      agentId: "kiro-cli",
-    }));
-
-    const snapshot = api.buildSessionSnapshot();
-    assert.strictEqual(snapshot.sessions[0].displayTitle, "Legacy Kiro");
-  });
-
-  it("prefers cwd-scoped Kiro default-session aliases over legacy aliases", () => {
-    api.cleanup();
-    api = require("../src/state")(makeCtx({
-      getSessionAliases: () => ({
-        "local|kiro-cli|default": { title: "Legacy Kiro", updatedAt: 100 },
-        "local|kiro-cli|default|cwd:%2Frepo%2Fa": { title: "Kiro repo A", updatedAt: 200 },
-      }),
-    }));
-    api.sessions.set("default", rawSession("working", {
-      updatedAt: 1000,
-      cwd: "/repo/a",
-      agentId: "kiro-cli",
-    }));
-
-    const snapshot = api.buildSessionSnapshot();
-    assert.strictEqual(snapshot.sessions[0].displayTitle, "Kiro repo A");
-  });
 
   it("returns active session alias keys for all sessions including idle and headless", () => {
     api.cleanup();
     api = require("../src/state")(makeCtx());
     api.sessions.set("idle-session", rawSession("idle", {
-      agentId: "codex",
       host: null,
     }));
     api.sessions.set("headless-session", rawSession("working", {
-      agentId: "claude-code",
       host: "remote-box",
       headless: true,
     }));
     api.sessions.set("default", rawSession("working", {
-      agentId: "kiro-cli",
       cwd: "/repo/a",
     }));
 
     assert.deepStrictEqual(
       Array.from(api.getActiveSessionAliasKeys()).sort(),
       [
-        "local|codex|idle-session",
-        "local|kiro-cli|default|cwd:%2Frepo%2Fa",
-        "remote-box|claude-code|headless-session",
+        "local|default",
+        "local|idle-session",
+        "remote-box|headless-session",
       ]
     );
   });
@@ -1721,7 +1399,6 @@ describe("emitSessionSnapshot diff", () => {
     api.sessions.set("s1", rawSession("working", {
       updatedAt: 1000,
       cwd: "/tmp/one",
-      agentId: "claude-code",
       recentEvents: [{ event: "PreToolUse", state: "working", at: 900 }],
     }));
 
@@ -1737,12 +1414,10 @@ describe("emitSessionSnapshot diff", () => {
     api.sessions.set("s1", rawSession("working", {
       updatedAt: 1000,
       cwd: "/tmp/one",
-      agentId: "claude-code",
     }));
     api.sessions.set("s2", rawSession("working", {
       updatedAt: 2000,
       cwd: "/tmp/two",
-      agentId: "codex",
     }));
 
     assert.strictEqual(api.emitSessionSnapshot().changed, true);
@@ -1754,11 +1429,10 @@ describe("emitSessionSnapshot diff", () => {
     assert.strictEqual(broadcasts[broadcasts.length - 1].lastSessionId, "s1");
   });
 
-  it("broadcasts when visible fields change, including cwd and agentId", () => {
+  it("broadcasts when visible fields change, including cwd and recentEvents", () => {
     api.sessions.set("s1", rawSession("idle", {
       updatedAt: 1000,
       cwd: "/tmp/one",
-      agentId: "claude-code",
       recentEvents: [{ event: "SessionStart", state: "idle", at: 900 }],
     }));
 
@@ -1767,13 +1441,10 @@ describe("emitSessionSnapshot diff", () => {
     api.sessions.get("s1").cwd = "/tmp/two";
     assert.strictEqual(api.emitSessionSnapshot().changed, true);
 
-    api.sessions.get("s1").agentId = "codex";
-    assert.strictEqual(api.emitSessionSnapshot().changed, true);
-
     api.sessions.get("s1").recentEvents.push({ event: "SessionStart", state: "idle", at: 1200 });
     assert.strictEqual(api.emitSessionSnapshot().changed, true);
 
-    assert.strictEqual(broadcasts.length, 4);
+    assert.strictEqual(broadcasts.length, 3);
   });
 });
 
@@ -1817,7 +1488,7 @@ describe("deriveSessionBadge", () => {
     assert.strictEqual(api.deriveSessionBadge(s), "done");
   });
 
-  it("returns 'idle' when idle with Gemini AfterAgent in recentEvents", () => {
+  it("returns 'idle' when idle with AfterAgent in recentEvents", () => {
     const s = { state: "idle", recentEvents: [{ event: "AfterAgent" }] };
     assert.strictEqual(api.deriveSessionBadge(s), "idle");
   });
@@ -1932,21 +1603,6 @@ describe("DND mode", () => {
     assert.strictEqual(api.getCurrentState(), "sleeping");
   });
 
-  it("DND dismisses pending permissions without resolving deny", () => {
-    const resolved = [];
-    const dismissed = [];
-    ctx.resolvePermissionEntry = (perm, action) => resolved.push({ perm, action });
-    ctx.dismissPermissionsForDnd = () => {
-      dismissed.push([...ctx.pendingPermissions]);
-      ctx.pendingPermissions.length = 0;
-      return 2;
-    };
-    ctx.pendingPermissions = ["p1", "p2"];
-    api.enableDoNotDisturb();
-    assert.deepStrictEqual(dismissed, [["p1", "p2"]]);
-    assert.deepStrictEqual(resolved, []);
-    assert.deepStrictEqual(ctx.pendingPermissions, []);
-  });
 
   it("DND clears pending and auto-return timers", () => {
     // Set up a pending timer by transitioning

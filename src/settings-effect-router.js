@@ -3,20 +3,12 @@
 const MENU_AFFECTING_KEYS = new Set([
   "lang",
   "soundMuted",
-  "bubbleFollowPet",
   "hideBubbles",
-  "permissionBubblesEnabled",
-  "notificationBubbleAutoCloseSeconds",
-  "permissionBubbleAutoCloseSeconds",
-  "updateBubbleAutoCloseSeconds",
-  "manageClaudeHooksAutomatically",
-  "autoStartWithClaude",
   "openAtLogin",
   "showTray",
   "showDock",
   "theme",
   "size",
-  "sessionAliases",
 ]);
 
 function requiredDependency(value, name) {
@@ -55,15 +47,8 @@ function createSettingsEffectRouter(options = {}) {
   const sendSessionHudI18n = options.sendSessionHudI18n || noop;
   const emitSessionSnapshot = options.emitSessionSnapshot || noop;
   const cleanStaleSessions = options.cleanStaleSessions || noop;
-  const syncPermissionShortcuts = options.syncPermissionShortcuts || noop;
-  const dismissInteractivePermissionBubbles = options.dismissInteractivePermissionBubbles || noop;
-  const clearCodexNotifyBubbles = options.clearCodexNotifyBubbles || noop;
-  const clearKimiNotifyBubbles = options.clearKimiNotifyBubbles || noop;
-  const refreshPassiveNotifyAutoClose = options.refreshPassiveNotifyAutoClose || noop;
-  const refreshPermissionAutoCloseForPolicy = options.refreshPermissionAutoCloseForPolicy || noop;
   const hideUpdateBubbleForPolicy = options.hideUpdateBubbleForPolicy || noop;
   const refreshUpdateBubbleAutoClose = options.refreshUpdateBubbleAutoClose || noop;
-  const repositionFloatingBubbles = options.repositionFloatingBubbles || noop;
   const syncSessionHudVisibility = options.syncSessionHudVisibility || noop;
   const reclampPetAfterEdgePinningChange = options.reclampPetAfterEdgePinningChange || noop;
   const rebuildAllMenus = options.rebuildAllMenus || noop;
@@ -96,49 +81,8 @@ function createSettingsEffectRouter(options = {}) {
       safeCall(logWarn, "Clawd: dashboard lang broadcast failed:", sendDashboardI18n);
       safeCall(logWarn, "Clawd: session HUD lang broadcast failed:", sendSessionHudI18n);
     }
-    if ("sessionAliases" in changes) {
-      safeCall(
-        logWarn,
-        "Clawd: session alias snapshot broadcast failed:",
-        emitSessionSnapshot,
-        { force: true }
-      );
-    }
 
     // 2. Reactive side effects.
-    if ("hideBubbles" in changes || "permissionBubblesEnabled" in changes) {
-      safeCall(logWarn, "Clawd: syncPermissionShortcuts failed:", syncPermissionShortcuts);
-    }
-    if (
-      ("permissionBubblesEnabled" in changes && changes.permissionBubblesEnabled === false) ||
-      ("hideBubbles" in changes && changes.hideBubbles === true)
-    ) {
-      safeCall(
-        logWarn,
-        "Clawd: dismiss interactive bubbles failed:",
-        dismissInteractivePermissionBubbles
-      );
-    }
-    if (
-      ("notificationBubbleAutoCloseSeconds" in changes && changes.notificationBubbleAutoCloseSeconds === 0) ||
-      ("hideBubbles" in changes && changes.hideBubbles === true)
-    ) {
-      try {
-        clearCodexNotifyBubbles(undefined, "settings-policy-disabled");
-        clearKimiNotifyBubbles(undefined, "settings-policy-disabled");
-      } catch (err) {
-        warn(logWarn, "Clawd: clear notification bubbles failed:", err);
-      }
-    } else if (
-      "notificationBubbleAutoCloseSeconds" in changes &&
-      changes.notificationBubbleAutoCloseSeconds > 0
-    ) {
-      safeCall(
-        logWarn,
-        "Clawd: refresh notification bubble timers failed:",
-        refreshPassiveNotifyAutoClose
-      );
-    }
     if (
       ("updateBubbleAutoCloseSeconds" in changes && changes.updateBubbleAutoCloseSeconds === 0) ||
       ("hideBubbles" in changes && changes.hideBubbles === true)
@@ -154,18 +98,6 @@ function createSettingsEffectRouter(options = {}) {
         refreshUpdateBubbleAutoClose
       );
     }
-    // Permission autoclose: any change (including 0 = disable) needs to be
-    // pushed into pending entries so they re-arm or clear timers.
-    if ("permissionBubbleAutoCloseSeconds" in changes) {
-      safeCall(
-        logWarn,
-        "Clawd: refresh permission bubble timer failed:",
-        refreshPermissionAutoCloseForPolicy
-      );
-    }
-    if ("bubbleFollowPet" in changes) {
-      safeCall(logWarn, "Clawd: repositionFloatingBubbles failed:", repositionFloatingBubbles);
-    }
     if (
       "sessionHudEnabled" in changes
       || "sessionHudShowElapsed" in changes
@@ -174,7 +106,6 @@ function createSettingsEffectRouter(options = {}) {
     ) {
       try {
         syncSessionHudVisibility();
-        repositionFloatingBubbles();
       } catch (err) {
         warn(logWarn, "Clawd: session HUD setting sync failed:", err);
       }

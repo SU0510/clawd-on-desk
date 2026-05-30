@@ -2,7 +2,7 @@
 
 const defaultFs = require("fs");
 const defaultPath = require("path");
-const codexPetImporter = require("./codex-pet-importer");
+const zlib = require("zlib");
 const {
   collectRequiredAssetFiles,
   mergeDefaults,
@@ -14,6 +14,81 @@ const MAX_THEME_ZIP_ENTRY_BYTES = 40 * 1024 * 1024;
 const MAX_THEME_UNZIPPED_BYTES = 160 * 1024 * 1024;
 const MAX_THEME_JSON_BYTES = 512 * 1024;
 const RESERVED_THEME_IDS = new Set(["clawd", "calico", "cloudling", "template"]);
+
+// ── Minimal ZIP parsing (inlined from deleted codex-pet-importer) ──
+function findEndOfCentralDirectory(buffer) {
+  const min = Math.max(0, buffer.length - 0xffff - 22);
+  for (let offset = buffer.length - 22; offset >= min; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) return offset;
+  }
+  throw new Error("invalid zip package: missing central directory");
+}
+
+function normalizeZipEntryName(name) {
+  const normalized = String(name || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized) throw new Error("zip entry has an empty name");
+  if (/^[a-zA-Z]:\//.test(normalized)) throw new Error(`zip entry uses an absolute path: ${name}`);
+  const parts = normalized.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) {
+    if (normalized.endsWith("/") && parts[parts.length - 1] === "") {
+      const dirParts = parts.slice(0, -1);
+      if (!dirParts.some((part) => part === "" || part === "." || part === "..")) return `${dirParts.join("/")}/`;
+    }
+    throw new Error(`unsafe zip entry path: ${name}`);
+  }
+  return normalized;
+}
+
+function readZipEntries(buffer) {
+  const eocdOffset = findEndOfCentralDirectory(buffer);
+  const entryCount = buffer.readUInt16LE(eocdOffset + 10);
+  const centralDirOffset = buffer.readUInt32LE(eocdOffset + 16);
+  const entries = [];
+  let offset = centralDirOffset;
+  for (let i = 0; i < entryCount; i += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error("invalid zip central directory");
+    const flags = buffer.readUInt16LE(offset + 8);
+    const method = buffer.readUInt16LE(offset + 10);
+    const compressedSize = buffer.readUInt32LE(offset + 20);
+    const uncompressedSize = buffer.readUInt32LE(offset + 24);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const localHeaderOffset = buffer.readUInt32LE(offset + 42);
+    const nameStart = offset + 46;
+    const name = normalizeZipEntryName(buffer.slice(nameStart, nameStart + nameLength).toString("utf8"));
+    if (flags & 0x0001) throw new Error(`encrypted zip entries are not supported: ${name}`);
+    if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localHeaderOffset === 0xffffffff) {
+      throw new Error("zip64 packages are not supported");
+    }
+    entries.push({ name, directory: name.endsWith("/"), method, compressedSize, uncompressedSize, localHeaderOffset });
+    offset += 46 + nameLength + extraLength + buffer.readUInt16LE(offset + 32);
+  }
+  return entries;
+}
+
+function extractZipEntry(buffer, entry, maxBytes) {
+  const offset = entry.localHeaderOffset;
+  if (offset + 30 > buffer.length || buffer.readUInt32LE(offset) !== 0x04034b50) {
+    throw new Error(`invalid zip local header for ${entry.name}`);
+  }
+  if (entry.uncompressedSize > maxBytes) throw new Error(`zip entry exceeds ${maxBytes} bytes: ${entry.name}`);
+  const nameLength = buffer.readUInt16LE(offset + 26);
+  const extraLength = buffer.readUInt16LE(offset + 28);
+  const dataStart = offset + 30 + nameLength + extraLength;
+  const compressed = buffer.slice(dataStart, dataStart + entry.compressedSize);
+  let output;
+  if (entry.method === 0) output = compressed;
+  else if (entry.method === 8) {
+    try { output = zlib.inflateRawSync(compressed, { maxOutputLength: maxBytes }); }
+    catch (error) {
+      if (error && error.code === "ERR_BUFFER_TOO_LARGE") throw new Error(`zip entry exceeds ${maxBytes} bytes: ${entry.name}`);
+      throw error;
+    }
+  }
+  else throw new Error(`unsupported zip compression method ${entry.method} for ${entry.name}`);
+  if (output.length !== entry.uncompressedSize) throw new Error(`zip entry size mismatch: ${entry.name}`);
+  return output;
+}
 
 function isPathInsideDir(pathModule, rootDir, targetPath) {
   const root = pathModule.resolve(rootDir);
@@ -107,7 +182,7 @@ function importUserThemeZip(zipPath, options = {}) {
   if (stat.size > MAX_THEME_ZIP_BYTES) throw new Error(`theme zip exceeds ${MAX_THEME_ZIP_BYTES} bytes`);
 
   const buffer = fs.readFileSync(zipPath);
-  const entries = codexPetImporter.readZipEntries(buffer);
+  const entries = readZipEntries(buffer);
   const { prefix, folderName, themeJsonEntry } = chooseThemeZipRoot(entries);
   if (themeJsonEntry.uncompressedSize > MAX_THEME_JSON_BYTES) {
     throw new Error(`theme.json exceeds ${MAX_THEME_JSON_BYTES} bytes`);
@@ -146,7 +221,7 @@ function importUserThemeZip(zipPath, options = {}) {
       if (totalUnzipped > MAX_THEME_UNZIPPED_BYTES) {
         throw new Error(`theme zip unpacks above ${MAX_THEME_UNZIPPED_BYTES} bytes`);
       }
-      const contents = codexPetImporter.extractZipEntry(buffer, entry, MAX_THEME_ZIP_ENTRY_BYTES);
+      const contents = extractZipEntry(buffer, entry, MAX_THEME_ZIP_ENTRY_BYTES);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, contents);
     }

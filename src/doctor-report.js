@@ -131,35 +131,22 @@ function formatKiroScan(scan) {
   return parts.length ? parts.join("; ") : null;
 }
 
-function formatAgentDiagnosticNotes(detail) {
-  if (!detail || typeof detail !== "object") return [];
-  const notes = [];
-  pushIfValue(notes, "permission", detail.permissionBubbleDetail);
-  if (detail.supplementary && typeof detail.supplementary === "object") {
-    const key = detail.supplementary.key || "supplementary";
-    const value = detail.supplementary.value || "unknown";
-    const suffix = detail.supplementary.detail ? ` (${detail.supplementary.detail})` : "";
-    notes.push(`${key}=${value}${suffix}`);
+function formatKiroScan(scan) {
+  if (!scan || typeof scan !== "object") return null;
+  const parts = [];
+  if (Array.isArray(scan.fullyValidFiles) && scan.fullyValidFiles.length) {
+    parts.push(`valid=${scan.fullyValidFiles.join(", ")}`);
   }
-  if (detail.codexHookTrust && typeof detail.codexHookTrust === "object") {
-    const key = detail.codexHookTrust.key || "codex_hook_trust";
-    const value = detail.codexHookTrust.value || "unknown";
-    const suffix = detail.codexHookTrust.detail ? ` (${detail.codexHookTrust.detail})` : "";
-    notes.push(`${key}=${value}${suffix}`);
+  if (Array.isArray(scan.brokenFiles) && scan.brokenFiles.length) {
+    parts.push(`broken=${scan.brokenFiles.join(", ")}`);
   }
-  pushIfValue(notes, "kiro", formatKiroScan(detail.kiroScan));
-  pushIfValue(notes, "hook issue", detail.hookCommandIssue);
-  pushIfValue(notes, "opencode issue", detail.opencodeEntryIssue);
-  pushIfValue(notes, "opencode entry", detail.opencodeEntry);
-  return notes;
-}
-
-function formatAgentDetail(detail) {
-  if (!detail || typeof detail !== "object") return "";
-  return [
-    detail.detail,
-    ...formatAgentDiagnosticNotes(detail),
-  ].filter(Boolean).join("; ");
+  if (Array.isArray(scan.corruptFiles) && scan.corruptFiles.length) {
+    parts.push(`corrupt=${scan.corruptFiles.join(", ")}`);
+  }
+  if (Array.isArray(scan.noMarkerFiles) && scan.noMarkerFiles.length) {
+    parts.push(`no-marker=${scan.noMarkerFiles.length}`);
+  }
+  return parts.length ? parts.join("; ") : null;
 }
 
 function hasHttpOutcomeEvents(connectionTest) {
@@ -249,25 +236,6 @@ function formatDiagnosticReport(result, meta = {}) {
     }
   }
 
-  const agentCheck = findCheck(result, "agent-integrations");
-  if (agentCheck && Array.isArray(agentCheck.details)) {
-    lines.push(
-      "",
-      "## Agent Integrations",
-      "",
-      row(["Agent", "Source", "Status", "Detail"]),
-      row(["---", "---", "---", "---"])
-    );
-    for (const detail of agentCheck.details) {
-      lines.push(row([
-        detail.agentName || detail.agentId,
-        detail.eventSource || "",
-        detail.status || "",
-        formatAgentDetail(detail),
-      ]));
-    }
-  }
-
   lines.push(
     "",
     "**Privacy notice**: This report is generated locally. Clawd does not upload any data. User paths are replaced with `~`, and Clawd app paths are replaced with `[APP]`. The report contains no API keys, tokens, conversation content, or document filenames."
@@ -279,8 +247,6 @@ function formatDiagnosticReport(result, meta = {}) {
 module.exports = {
   redact,
   redactDoctorResult,
-  formatAgentDetail,
-  formatAgentDiagnosticNotes,
   normalizeDisplayPathSeparators,
   formatDiagnosticReport,
 };

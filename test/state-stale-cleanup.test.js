@@ -17,7 +17,6 @@ function session(overrides = {}) {
     updatedAt: 1000000,
     pidReachable: true,
     sourcePid: null,
-    agentPid: null,
     ...overrides,
   };
 }
@@ -38,17 +37,18 @@ function decision(target, overrides = {}) {
 }
 
 describe("state stale cleanup decisions", () => {
-  it("deletes immediately when a reachable agent pid is dead before badge checks", () => {
+  it("proceeds to badge checks without agent pid early exit", () => {
     let badgeCalls = 0;
-    const { result, calls } = decision(session({ agentPid: 10, sourcePid: 20 }), {
+    const { result } = decision(session({ sourcePid: 20 }), {
       alivePids: new Set([20]),
       deriveSessionBadge: () => { badgeCalls += 1; return "done"; },
       shouldAutoClearDetachedSession: () => true,
     });
 
-    assert.deepStrictEqual(result, { action: "delete", reason: "agent-exit" });
-    assert.deepStrictEqual(calls, [10]);
-    assert.strictEqual(badgeCalls, 0);
+    // Without agentPid, the stale cleanup proceeds to badge checking
+    assert.strictEqual(badgeCalls, 1);
+    // Auto-clearable detached session gets snapshot refresh needed (under threshold)
+    assert.deepStrictEqual(result, { action: null, snapshotRefreshNeeded: true });
   });
 
   it("marks a detached ended session for HUD refresh before fast deletion threshold", () => {

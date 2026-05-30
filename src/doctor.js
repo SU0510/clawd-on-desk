@@ -1,8 +1,6 @@
 "use strict";
 
 const { checkLocalServer } = require("./doctor-detectors/local-server");
-const { checkAgentIntegrations } = require("./doctor-detectors/agent-integrations");
-const { checkPermissionBubblePolicy } = require("./doctor-detectors/permission-bubble-policy");
 const { checkThemeHealth } = require("./doctor-detectors/theme-health");
 
 function normalizeCheckLevel(check) {
@@ -25,17 +23,6 @@ function runDoctorChecks(options = {}) {
   const prefs = options.prefs || {};
   const checks = [
     (options.checkLocalServer || checkLocalServer)(options.server),
-    (options.checkAgentIntegrations || checkAgentIntegrations)({
-      prefs,
-      fs: options.fs,
-      platform: options.platform,
-      descriptors: options.descriptors,
-      validateCommand: options.validateCommand,
-    }),
-    (options.checkPermissionBubblePolicy || checkPermissionBubblePolicy)({
-      prefs,
-      doNotDisturb: !!options.doNotDisturb,
-    }),
     (options.checkThemeHealth || checkThemeHealth)({
       prefs,
       themeId: options.themeId,

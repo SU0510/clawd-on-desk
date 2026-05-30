@@ -73,12 +73,9 @@ describe("state-priority display selection", () => {
     ])), "carrying");
   });
 
-  it("applies permission locks and update overlays with strict priority comparison", () => {
+  it("applies update overlays with strict priority comparison", () => {
     const sessions = new Map([["s1", session("working")]]);
     assert.strictEqual(resolveDisplayStateFromSessions(sessions), "working");
-    assert.strictEqual(resolveDisplayStateFromSessions(sessions, {
-      permissionLocked: true,
-    }), "notification");
     assert.strictEqual(resolveDisplayStateFromSessions(sessions, {
       updateVisualState: "thinking",
       updateVisualPriority: STATE_PRIORITY.notification,
@@ -93,11 +90,10 @@ describe("state-priority display selection", () => {
     }), "error");
   });
 
-  it("keeps equal-priority update overlays below permission locks", () => {
+  it("keeps equal-priority update overlays below session state", () => {
     assert.strictEqual(resolveDisplayStateFromSessions(new Map(), {
-      permissionLocked: true,
       updateVisualState: "thinking",
       updateVisualPriority: STATE_PRIORITY.notification,
-    }), "notification");
+    }), "thinking");
   });
 });

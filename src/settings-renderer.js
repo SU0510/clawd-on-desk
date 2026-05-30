@@ -3,15 +3,12 @@
 const core = globalThis.ClawdSettingsCore;
 
 const SIDEBAR_TABS = [
-  { id: "general", icon: "\u2699", labelKey: "sidebarGeneral", available: true },
-  { id: "agents", icon: "\u26A1", labelKey: "sidebarAgents", available: true },
+  { id: "general", icon: "⚙", labelKey: "sidebarGeneral", available: true },
   { id: "theme", icon: "\u{1F3A8}", labelKey: "sidebarTheme", available: true },
   { id: "animMap", icon: "\u{1F3AC}", labelKey: "sidebarAnimMap", available: true },
   { id: "animOverrides", icon: "\u{1F39E}", labelKey: "sidebarAnimOverrides", available: true },
-  { id: "shortcuts", icon: "\u2328", labelKey: "sidebarShortcuts", available: true },
-  { id: "telegram-approval", icon: "\u2708", labelKey: "sidebarTelegramApproval", available: true },
-  { id: "remote-ssh", icon: "\u{1F50C}", labelKey: "sidebarRemoteSsh", available: true },
-  { id: "about", icon: "\u2139", labelKey: "sidebarAbout", available: true },
+  { id: "shortcuts", icon: "⌨", labelKey: "sidebarShortcuts", available: true },
+  { id: "about", icon: "ℹ", labelKey: "sidebarAbout", available: true },
 ];
 
 function renderSidebar() {
@@ -71,14 +68,11 @@ core.ops.installRenderHooks({
 });
 
 globalThis.ClawdSettingsTabGeneral.init(core);
-globalThis.ClawdSettingsTabAgents.init(core);
 globalThis.ClawdSettingsTabTheme.init(core);
 globalThis.ClawdSettingsTabAnimMap.init(core);
 globalThis.ClawdSettingsTabAnimOverrides.init(core);
 globalThis.ClawdSettingsTabShortcuts.init(core);
-if (globalThis.ClawdSettingsTabTelegramApproval) globalThis.ClawdSettingsTabTelegramApproval.init(core);
 globalThis.ClawdSettingsTabAbout.init(core);
-if (globalThis.ClawdSettingsTabRemoteSsh) globalThis.ClawdSettingsTabRemoteSsh.init(core);
 
 if (window.settingsAPI && typeof window.settingsAPI.onChanged === "function") {
   window.settingsAPI.onChanged((payload) => core.ops.applyChanges(payload));
@@ -107,14 +101,5 @@ if (window.settingsAPI && typeof window.settingsAPI.getShortcutFailures === "fun
 if (window.settingsAPI && typeof window.settingsAPI.getSnapshot === "function") {
   window.settingsAPI.getSnapshot().then((snapshot) => {
     core.ops.applyBootstrap(snapshot);
-  });
-}
-
-if (window.settingsAPI && typeof window.settingsAPI.listAgents === "function") {
-  window.settingsAPI.listAgents().then((list) => {
-    core.ops.applyAgentMetadata(list);
-  }).catch((err) => {
-    console.warn("settings: listAgents failed", err);
-    core.ops.applyAgentMetadata([]);
   });
 }

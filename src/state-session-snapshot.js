@@ -1,9 +1,22 @@
 "use strict";
 
 const path = require("path");
-const { sessionAliasKey } = require("./session-alias");
-const { getSessionFocusTarget } = require("./session-focus");
-const { readCodexThreadName } = require("../hooks/codex-session-index");
+
+// Simplified session alias key — builds a composite key from host, agent (unused), and session id.
+function sessionAliasKey(host, _agentId, sessionId, _options) {
+  if (!sessionId) return null;
+  const h = (typeof host === "string" && host.trim()) || "local";
+  return `${h}|${sessionId}`;
+}
+
+// Simplified focus target — without agent-specific codex thread URLs,
+// focus is only possible for local sessions with a sourcePid (terminal).
+function getSessionFocusTarget(entry) {
+  if (!entry || !entry.id) return { canFocus: false, type: null, url: null };
+  if (entry.host || entry.platform === "webui") return { canFocus: false, type: null, url: null };
+  if (entry.sourcePid) return { canFocus: true, type: "terminal", url: null };
+  return { canFocus: false, type: null, url: null };
+}
 
 const EVENT_LABEL_KEYS = {
   SessionStart: "eventLabelSessionStart",
@@ -64,7 +77,7 @@ function isEndedSessionBadge(badge) {
 
 function shouldAutoClearDetachedSession(session, badge, options = {}) {
   if (options.sessionHudCleanupDetached !== true) return false;
-  if (!session || session.headless || session.state !== "idle" || session.agentPid) return false;
+  if (!session || session.headless || session.state !== "idle") return false;
   if (!session.pidReachable || !session.sourcePid) return false;
   if (!isEndedSessionBadge(badge)) return false;
   const isProcessAlive = typeof options.isProcessAlive === "function"
@@ -76,7 +89,7 @@ function shouldAutoClearDetachedSession(session, badge, options = {}) {
 function getSessionAliasEntry(id, sessionLike, sessionAliases = {}) {
   const scopedAliasKey = sessionAliasKey(
     sessionLike && sessionLike.host,
-    sessionLike && sessionLike.agentId,
+    null,
     id,
     { cwd: sessionLike && sessionLike.cwd }
   );
@@ -84,7 +97,7 @@ function getSessionAliasEntry(id, sessionLike, sessionAliases = {}) {
 
   const legacyAliasKey = sessionAliasKey(
     sessionLike && sessionLike.host,
-    sessionLike && sessionLike.agentId,
+    null,
     id
   );
   if (legacyAliasKey && legacyAliasKey !== scopedAliasKey) return sessionAliases[legacyAliasKey] || null;
@@ -92,13 +105,6 @@ function getSessionAliasEntry(id, sessionLike, sessionAliases = {}) {
 }
 
 function getEffectiveSessionTitle(id, sessionLike, options = {}) {
-  const readThreadName = typeof options.readCodexThreadName === "function"
-    ? options.readCodexThreadName
-    : readCodexThreadName;
-  if (sessionLike && sessionLike.agentId === "codex" && !sessionLike.host) {
-    const threadName = normalizeTitle(readThreadName(id));
-    if (threadName) return threadName;
-  }
   return normalizeTitle(sessionLike && sessionLike.sessionTitle);
 }
 
@@ -134,9 +140,6 @@ function buildSessionSnapshotEntry(id, session, sessionAliases = {}, options = {
   const rawEvent = latestEvent && latestEvent.event ? latestEvent.event : null;
   const eventAt = Number(latestEvent && latestEvent.at);
   const badge = deriveSessionBadge(session);
-  const getAgentIconUrl = typeof options.getAgentIconUrl === "function"
-    ? options.getAgentIconUrl
-    : () => null;
   const state = (session && session.state) || "idle";
   const hiddenFromHud = shouldAutoClearDetachedSession(session, badge, options);
   const focusTarget = session && !session.headless && state !== "sleeping" && !hiddenFromHud
@@ -144,8 +147,6 @@ function buildSessionSnapshotEntry(id, session, sessionAliases = {}, options = {
     : { canFocus: false, type: null, url: null };
   return {
     id,
-    agentId: (session && session.agentId) || null,
-    iconUrl: getAgentIconUrl(session && session.agentId),
     state,
     badge,
     hiddenFromHud,
@@ -163,8 +164,6 @@ function buildSessionSnapshotEntry(id, session, sessionAliases = {}, options = {
     platform: (session && session.platform) || null,
     model: (session && session.model) || null,
     provider: (session && session.provider) || null,
-    codexOriginator: (session && session.codexOriginator) || null,
-    codexSource: (session && session.codexSource) || null,
     lastEvent: latestEvent ? {
       labelKey: rawEvent ? (EVENT_LABEL_KEYS[rawEvent] || null) : null,
       rawEvent,
@@ -231,7 +230,7 @@ function getActiveSessionAliasKeys(sessions) {
   for (const [id, session] of normalizeSessionsIterable(sessions)) {
     const key = sessionAliasKey(
       session && session.host,
-      session && session.agentId,
+      null,
       id,
       { cwd: session && session.cwd }
     );
@@ -257,7 +256,6 @@ function sessionSnapshotSignature(snapshot) {
       sessionTitle: entry.sessionTitle,
       displayTitle: entry.displayTitle,
       cwd: entry.cwd,
-      agentId: entry.agentId,
       sourcePid: entry.sourcePid,
       wtHwnd: entry.wtHwnd,
       canFocus: entry.canFocus,
@@ -268,8 +266,6 @@ function sessionSnapshotSignature(snapshot) {
       platform: entry.platform,
       model: entry.model,
       provider: entry.provider,
-      codexOriginator: entry.codexOriginator,
-      codexSource: entry.codexSource,
       lastEventLabelKey: entry.lastEvent ? entry.lastEvent.labelKey : null,
       lastEventRawEvent: entry.lastEvent ? entry.lastEvent.rawEvent : null,
       lastEventAt: entry.lastEvent ? entry.lastEvent.at : null,

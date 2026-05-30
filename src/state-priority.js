@@ -61,10 +61,6 @@ function resolveDisplayStateFromSessions(sessions, options = {}) {
   const statePriority = options.statePriority || STATE_PRIORITY;
   let best = resolveDominantSessionState(sessions, { statePriority });
 
-  if (options.permissionLocked === true) {
-    best = "notification";
-  }
-
   const updateVisualState = options.updateVisualState || null;
   if (updateVisualState) {
     const updateVisualPriority = options.updateVisualPriority || getStatePriority(updateVisualState, statePriority);

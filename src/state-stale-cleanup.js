@@ -13,10 +13,6 @@ function getStaleSessionDecision(session, options = {}) {
   const age = now - session.updatedAt;
   const isProcessAlive = options.isProcessAlive;
 
-  if (session.pidReachable && session.agentPid && !isProcessAlive(session.agentPid)) {
-    return { action: "delete", reason: "agent-exit" };
-  }
-
   const deriveSessionBadge = options.deriveSessionBadge;
   const shouldAutoClearDetachedSession = options.shouldAutoClearDetachedSession;
   const badge = deriveSessionBadge(session);

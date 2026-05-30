@@ -28,7 +28,6 @@ function session(state, overrides = {}) {
     state,
     updatedAt: 1000,
     cwd: "",
-    agentId: "claude-code",
     recentEvents: [],
     ...overrides,
   };
@@ -49,7 +48,7 @@ describe("state-session-snapshot badges", () => {
 });
 
 describe("state-session-snapshot builder", () => {
-  it("builds ordered dashboard/menu groups and HUD summary with injected deps", () => {
+  it("builds ordered dashboard/menu groups and HUD summary", () => {
     const sessions = new Map([
       ["old-working", session("working", {
         updatedAt: 1000,
@@ -63,7 +62,6 @@ describe("state-session-snapshot builder", () => {
       ["latest-remote", session("idle", {
         updatedAt: 3000,
         cwd: "/tmp/latest-project",
-        agentId: "codex",
         host: "remote-box",
         headless: true,
         recentEvents: [{ event: "MysteryEvent", state: "idle", at: 2900 }],
@@ -71,13 +69,11 @@ describe("state-session-snapshot builder", () => {
       ["error-local", session("error", {
         updatedAt: 2000,
         cwd: "/tmp/error-project",
-        agentId: "missing-agent",
       })],
     ]);
 
     const snapshot = buildSessionSnapshot(sessions, {
       statePriority: STATE_PRIORITY,
-      getAgentIconUrl: (agentId) => agentId === "missing-agent" ? null : `icon:${agentId}`,
     });
 
     assert.deepStrictEqual(snapshot.orderedIds, ["latest-remote", "error-local", "old-working"]);
@@ -94,7 +90,6 @@ describe("state-session-snapshot builder", () => {
 
     const oldWorking = snapshot.sessions.find((entry) => entry.id === "old-working");
     assert.strictEqual(oldWorking.badge, "running");
-    assert.strictEqual(oldWorking.iconUrl, "icon:claude-code");
     assert.strictEqual(oldWorking.platform, "webui");
     assert.strictEqual(oldWorking.model, "gpt-5.4");
     assert.strictEqual(oldWorking.provider, "openai");
@@ -116,15 +111,11 @@ describe("state-session-snapshot builder", () => {
     });
   });
 
-  it("exposes focus target metadata for terminal and Codex Desktop sessions", () => {
+  it("exposes focus target metadata for terminal sessions", () => {
     const snapshot = buildSessionSnapshot(new Map([
       ["terminal", session("working", { sourcePid: 123 })],
       ["webui", session("working", { sourcePid: 456, platform: "webui" })],
-      ["codex:019e115a-4df2-7ed0-b90e-8e6345aca777", session("working", {
-        agentId: "codex",
-        codexOriginator: "Codex Desktop",
-        codexSource: "vscode",
-      })],
+      ["remote", session("working", { sourcePid: 789, host: "remote-box" })],
     ]));
 
     const byId = new Map(snapshot.sessions.map((entry) => [entry.id, entry]));
@@ -132,19 +123,14 @@ describe("state-session-snapshot builder", () => {
     assert.deepStrictEqual(byId.get("terminal").focusTarget, { type: "terminal", url: null });
     assert.strictEqual(byId.get("webui").canFocus, false);
     assert.strictEqual(byId.get("webui").focusTarget, null);
-    assert.strictEqual(byId.get("codex:019e115a-4df2-7ed0-b90e-8e6345aca777").canFocus, true);
-    assert.deepStrictEqual(byId.get("codex:019e115a-4df2-7ed0-b90e-8e6345aca777").focusTarget, {
-      type: "codex-thread",
-      url: "codex://threads/019e115a-4df2-7ed0-b90e-8e6345aca777",
-    });
-    assert.strictEqual(byId.get("codex:019e115a-4df2-7ed0-b90e-8e6345aca777").codexSource, "vscode");
+    assert.strictEqual(byId.get("remote").canFocus, false);
+    assert.strictEqual(byId.get("remote").focusTarget, null);
   });
 
   it("does not expose focus targets for sessions hidden from the focusable UI surface", () => {
     const hiddenEndedSession = session("idle", {
       sourcePid: 123,
       pidReachable: true,
-      agentPid: null,
       recentEvents: [{ event: "Stop", state: "idle", at: 1 }],
     });
     const snapshot = buildSessionSnapshot(new Map([
@@ -152,11 +138,6 @@ describe("state-session-snapshot builder", () => {
       ["sleeping", session("sleeping", { sourcePid: 123 })],
       ["remote", session("working", { sourcePid: 123, host: "remote-box" })],
       ["hidden", hiddenEndedSession],
-      ["codex:019e115a-4df2-7ed0-b90e-8e6345aca777", session("working", {
-        agentId: "codex",
-        codexOriginator: "Codex Desktop",
-        headless: true,
-      })],
     ]), {
       sessionHudCleanupDetached: true,
       isProcessAlive: () => false,
@@ -169,49 +150,35 @@ describe("state-session-snapshot builder", () => {
     assert.strictEqual(snapshot.sessions.find((entry) => entry.id === "hidden").hiddenFromHud, true);
   });
 
-  it("applies aliases, Codex thread names, and Kiro cwd-scoped alias keys", () => {
+  it("applies session aliases and falls back to cwd/title", () => {
     const sessions = new Map([
-      ["claude-local", session("working", {
+      ["session-a", session("working", {
         updatedAt: 3000,
         cwd: "/repo/a",
-        agentId: "claude-code",
         sessionTitle: "Raw title",
       })],
-      ["codex:abc", session("thinking", {
+      ["session-b", session("thinking", {
         updatedAt: 2000,
         cwd: "/repo/b",
-        agentId: "codex",
         sessionTitle: "Auto Summary",
-      })],
-      ["default", session("working", {
-        updatedAt: 1000,
-        cwd: "/repo/c",
-        agentId: "kiro-cli",
       })],
     ]);
 
     const snapshot = buildSessionSnapshot(sessions, {
       statePriority: STATE_PRIORITY,
       sessionAliases: {
-        "local|claude-code|claude-local": { title: "Claude review", updatedAt: 100 },
-        "local|kiro-cli|default": { title: "Legacy Kiro", updatedAt: 100 },
-        "local|kiro-cli|default|cwd:%2Frepo%2Fc": { title: "Kiro repo C", updatedAt: 200 },
+        "local|session-a": { title: "Aliased title", updatedAt: 100 },
       },
-      readCodexThreadName: (id) => id === "codex:abc" ? "Thread name" : null,
     });
 
-    assert.strictEqual(snapshot.sessions.find((entry) => entry.id === "claude-local").displayTitle, "Claude review");
-    const codex = snapshot.sessions.find((entry) => entry.id === "codex:abc");
-    assert.strictEqual(codex.sessionTitle, "Thread name");
-    assert.strictEqual(codex.displayTitle, "Thread name");
-    assert.strictEqual(snapshot.sessions.find((entry) => entry.id === "default").displayTitle, "Kiro repo C");
+    assert.strictEqual(snapshot.sessions.find((entry) => entry.id === "session-a").displayTitle, "Aliased title");
+    assert.strictEqual(snapshot.sessions.find((entry) => entry.id === "session-b").displayTitle, "Auto Summary");
 
     assert.deepStrictEqual(
       [...getActiveSessionAliasKeys(sessions)].sort(),
       [
-        "local|claude-code|claude-local",
-        "local|codex|codex:abc",
-        "local|kiro-cli|default|cwd:%2Frepo%2Fc",
+        "local|session-a",
+        "local|session-b",
       ].sort()
     );
   });
@@ -244,7 +211,7 @@ describe("state-session-snapshot builder", () => {
     assert.strictEqual(snapshot.hudLastSessionId, "idle-local");
   });
 
-  it("snapshot signatures include visible fields but ignore icon URL churn", () => {
+  it("snapshot signatures include visible fields", () => {
     const base = buildSessionSnapshot(new Map([
       ["s1", session("working", {
         updatedAt: 1000,
@@ -253,17 +220,6 @@ describe("state-session-snapshot builder", () => {
       })],
     ]), {
       statePriority: STATE_PRIORITY,
-      getAgentIconUrl: () => "icon:a",
-    });
-    const sameExceptIcon = buildSessionSnapshot(new Map([
-      ["s1", session("working", {
-        updatedAt: 1000,
-        sessionTitle: "Title",
-        recentEvents: [{ event: "PreToolUse", state: "working", at: 900 }],
-      })],
-    ]), {
-      statePriority: STATE_PRIORITY,
-      getAgentIconUrl: () => "icon:b",
     });
     const differentTitle = buildSessionSnapshot(new Map([
       ["s1", session("working", {
@@ -273,10 +229,8 @@ describe("state-session-snapshot builder", () => {
       })],
     ]), {
       statePriority: STATE_PRIORITY,
-      getAgentIconUrl: () => "icon:a",
     });
 
-    assert.strictEqual(sessionSnapshotSignature(base), sessionSnapshotSignature(sameExceptIcon));
     assert.notStrictEqual(sessionSnapshotSignature(base), sessionSnapshotSignature(differentTitle));
   });
 });

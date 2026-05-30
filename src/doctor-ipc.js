@@ -58,7 +58,6 @@ function registerDoctorIpc({
   shell,
   server,
   getPrefsSnapshot,
-  getDoNotDisturb,
   getLocale,
 }) {
   let lastDoctorResult = null;
@@ -81,7 +80,6 @@ function registerDoctorIpc({
     lastDoctorResult = runDoctorChecks({
       server,
       prefs: getPrefsSnapshot(),
-      doNotDisturb: getDoNotDisturb(),
     });
     return lastDoctorResult;
   }

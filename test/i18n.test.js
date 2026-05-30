@@ -44,15 +44,6 @@ function loadSettingsI18nStrings() {
   return context.ClawdSettingsI18n.STRINGS;
 }
 
-function loadBubbleStrings() {
-  const source = fs.readFileSync(path.join(ROOT, "src", "bubble-renderer.js"), "utf8");
-  const match = source.match(/const BUBBLE_STRINGS = (\{[\s\S]*?\n\});/);
-  assert.ok(match, "bubble-renderer.js should define BUBBLE_STRINGS");
-  const context = {};
-  vm.runInNewContext(`result = ${match[1]};`, context);
-  return context.result;
-}
-
 describe("i18n locales", () => {
   it("lists all selectable languages in supported languages", () => {
     assert.deepStrictEqual(SUPPORTED_LANGS, ["en", "zh", "zh-TW", "ko", "ja"]);
@@ -64,10 +55,6 @@ describe("i18n locales", () => {
 
   it("keeps Settings locale keysets aligned with English", () => {
     assertLocaleObjectParity(loadSettingsI18nStrings(), "settings");
-  });
-
-  it("keeps permission bubble locale keysets aligned with English", () => {
-    assertLocaleObjectParity(loadBubbleStrings(), "bubble");
   });
 
   it("keeps main-process Settings dialog strings available for every supported language", () => {
@@ -84,21 +71,6 @@ describe("i18n locales", () => {
       const start = source.indexOf(`const ${name} = {`);
       assert.notStrictEqual(start, -1, `missing ${name}`);
       const end = source.indexOf("\n};", start);
-      assert.notStrictEqual(end, -1, `unterminated ${name}`);
-      const block = source.slice(start, end);
-      for (const lang of SUPPORTED_LANGS) {
-        const escapedLang = regexEscape(lang);
-        assert.match(block, new RegExp(`\\n\\s*(?:"${escapedLang}"|${escapedLang}):`), `${name} missing ${lang}`);
-      }
-    }
-  });
-
-  it("keeps Codex Pet main dialog strings available for every supported language", () => {
-    const source = fs.readFileSync(path.join(ROOT, "src", "codex-pet-main.js"), "utf8");
-    for (const name of ["getImportDialogStrings", "getRemovalDialogStrings"]) {
-      const start = source.indexOf(`function ${name}()`);
-      assert.notStrictEqual(start, -1, `missing ${name}`);
-      const end = source.indexOf("\n  async function", start);
       assert.notStrictEqual(end, -1, `unterminated ${name}`);
       const block = source.slice(start, end);
       for (const lang of SUPPORTED_LANGS) {

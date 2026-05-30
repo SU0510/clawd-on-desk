@@ -86,20 +86,10 @@ function rememberRuntimeSoundOverrideFile({ getActiveTheme }, themeId, soundName
   activeTheme._soundOverrideFiles = nextOverrideMap;
 }
 
-function mapAgentMetadata(agent) {
-  return {
-    id: agent.id,
-    name: agent.name,
-    eventSource: agent.eventSource,
-    capabilities: agent.capabilities || {},
-  };
-}
-
 function registerSettingsIpc(options = {}) {
   const ipcMain = requiredDependency(options.ipcMain, "ipcMain");
   const settingsController = requiredDependency(options.settingsController, "settingsController");
   const themeLoader = requiredDependency(options.themeLoader, "themeLoader");
-  const codexPetMain = requiredDependency(options.codexPetMain, "codexPetMain");
   const dialog = requiredDependency(options.dialog, "dialog");
   const shell = requiredDependency(options.shell, "shell");
   const app = requiredDependency(options.app, "app");
@@ -121,7 +111,6 @@ function registerSettingsIpc(options = {}) {
   const getDoNotDisturb = options.getDoNotDisturb || (() => false);
   const getSoundMuted = options.getSoundMuted || (() => false);
   const getSoundVolume = options.getSoundVolume || (() => 1);
-  const getAllAgents = requiredDependency(options.getAllAgents, "getAllAgents");
   const checkForUpdates = options.checkForUpdates || (() => {});
   const now = options.now || (() => Date.now());
   const aboutHeroSvgPath = options.aboutHeroSvgPath
@@ -271,12 +260,10 @@ function registerSettingsIpc(options = {}) {
     try {
       const activeTheme = getActiveTheme();
       const activeId = activeTheme ? activeTheme._id : "clawd";
-      return themeLoader.listThemesWithMetadata().map((theme) =>
-        codexPetMain.decorateThemeMetadata({
+      return themeLoader.listThemesWithMetadata().map((theme) => ({
           ...theme,
           active: theme.id === activeId,
-        })
-      );
+        }));
     } catch (err) {
       console.warn("Clawd: settings:list-themes failed:", err && err.message);
       return [];
@@ -321,10 +308,6 @@ function registerSettingsIpc(options = {}) {
     }
   });
 
-  handle("settings:refresh-codex-pets", () => codexPetMain.refreshFromSettings());
-  handle("settings:open-codex-pets-dir", () => codexPetMain.openCodexPetsDir());
-  handle("settings:import-codex-pet-zip", (event) => codexPetMain.importCodexPetZip(event));
-  handle("settings:remove-codex-pet", (_event, themeId) => codexPetMain.removeCodexPet(themeId));
 
   handle("settings:confirm-remove-theme", async (event, themeId) => {
     if (typeof themeId !== "string" || !themeId) return { confirmed: false };
@@ -349,14 +332,6 @@ function registerSettingsIpc(options = {}) {
     }
   });
 
-  handle("settings:list-agents", () => {
-    try {
-      return getAllAgents().map(mapAgentMetadata);
-    } catch (err) {
-      console.warn("Clawd: settings:list-agents failed:", err && err.message);
-      return [];
-    }
-  });
 
   handle("settings:get-about-info", () => {
     let heroSvgContent = "";
