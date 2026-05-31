@@ -1522,6 +1522,13 @@ if (!gotTheLock) {
   }
 
   app.whenReady().then(() => {
+  // macOS: set dock icon so dev mode shows the app icon instead of Electron default.
+  // Packaged .app bundles get their icon from the built-in .icns automatically.
+  if (isMac && app.dock && !app.isPackaged) {
+    const iconPath = path.join(__dirname, "..", "assets", "icon.png");
+    try { app.dock.setIcon(iconPath); } catch (_) { /* non-critical */ }
+  }
+
   // Import system-backed settings (openAtLogin) into prefs on first run.
   // Must run before createWindow() so the first menu draw sees the
   // hydrated value rather than the schema default.

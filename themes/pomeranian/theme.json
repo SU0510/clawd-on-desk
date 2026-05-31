@@ -35,9 +35,9 @@
     "offsetX": -0.45,
     "offsetY": -0.25,
     "fileScales": {
-      "front.png": 1.0,
-      "walking.gif": 0.75,
-      "happy.gif": 0.75,
+      "front.png": 0.75,
+      "walking.gif": 0.85,
+      "happy.gif": 0.70,
       "side.png": 0.9
     }
   },
