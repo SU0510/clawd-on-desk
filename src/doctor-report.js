@@ -178,10 +178,10 @@ function formatDiagnosticReport(result, meta = {}) {
   const checks = Array.isArray(result && result.checks) ? result.checks : [];
 
   const lines = [
-    "# Clawd Diagnostic Report",
+    "# Dommy Diagnostic Report",
     "",
     `- Generated: ${generatedAt}`,
-    `- Clawd version: ${version}`,
+    `- Dommy version: ${version}`,
     `- Platform: ${platform} (${release})`,
     `- Locale: ${locale}`,
     "",
@@ -238,7 +238,7 @@ function formatDiagnosticReport(result, meta = {}) {
 
   lines.push(
     "",
-    "**Privacy notice**: This report is generated locally. Clawd does not upload any data. User paths are replaced with `~`, and Clawd app paths are replaced with `[APP]`. The report contains no API keys, tokens, conversation content, or document filenames."
+    "**Privacy notice**: This report is generated locally. Dommy does not upload any data. User paths are replaced with `~`, and Dommy app paths are replaced with `[APP]`. The report contains no API keys, tokens, conversation content, or document filenames."
   );
 
   return redact(lines.join("\n"), meta);

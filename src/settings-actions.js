@@ -142,7 +142,7 @@ const updateRegistry = {
     if (!value && snapshot && snapshot.showDock === false) {
       return {
         status: "error",
-        message: "Cannot hide Menu Bar while Dock is also hidden — Clawd would become unquittable.",
+        message: "Cannot hide Menu Bar while Dock is also hidden — Dommy would become unquittable.",
       };
     }
     return { status: "ok" };
@@ -154,7 +154,7 @@ const updateRegistry = {
     if (!value && snapshot && snapshot.showTray === false) {
       return {
         status: "error",
-        message: "Cannot hide Dock while Menu Bar is also hidden — Clawd would become unquittable.",
+        message: "Cannot hide Dock while Menu Bar is also hidden — Dommy would become unquittable.",
       };
     }
     return { status: "ok" };

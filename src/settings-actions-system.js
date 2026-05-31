@@ -61,7 +61,7 @@ function restartClawd(payload, deps) {
   }
   try {
     deps.restartClawd();
-    return { status: "ok", message: "Clawd is restarting" };
+    return { status: "ok", message: "Dommy is restarting" };
   } catch (err) {
     return { status: "error", message: `restartClawd: ${err && err.message}` };
   }

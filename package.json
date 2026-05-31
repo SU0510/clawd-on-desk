@@ -1,5 +1,5 @@
 {
-  "name": "clawd-on-desk",
+  "name": "dommy-on-desk",
   "version": "0.8.0",
   "description": "A desktop pet that lives on your screen.",
   "main": "src/main.js",
@@ -33,8 +33,8 @@
   "license": "AGPL-3.0-only",
   "type": "commonjs",
   "build": {
-    "appId": "com.clawd.on-desk",
-    "productName": "Clawd on Desk",
+    "appId": "com.dommy.on-desk",
+    "productName": "Dommy on Desk",
     "mac": {
       "icon": "assets/icon.png",
       "target": [
@@ -54,7 +54,7 @@
     "win": {
       "icon": "assets/icon.ico",
       "signAndEditExecutable": false,
-      "artifactName": "Clawd-on-Desk-Setup-${version}-${arch}.${ext}",
+      "artifactName": "Dommy-on-Desk-Setup-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -117,7 +117,7 @@
       {
         "provider": "github",
         "owner": "rullerzhou-afk",
-        "repo": "clawd-on-desk"
+        "repo": "dommy-on-desk"
       }
     ]
   },

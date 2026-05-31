@@ -3,7 +3,7 @@
 const path = require("path");
 
 const WINDOWS_APP_USER_MODEL_ID = "com.pomeranian.on-desk";
-const SETTINGS_WINDOW_TITLE = "Clawd Settings";
+const SETTINGS_WINDOW_TITLE = "Dommy Settings";
 const SETTINGS_WINDOW_LAUNCH_ARG = "--open-settings-window";
 
 function quoteWindowsCommandArg(value) {

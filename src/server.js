@@ -100,7 +100,7 @@ module.exports = function initServer(ctx) {
     httpServer.on("listening", () => {
       activeServerPort = listenPorts[listenIndex];
       writeRuntimeConfigFn(activeServerPort);
-      console.log(`Pomeranian state server listening on 127.0.0.1:${activeServerPort}`);
+      console.log(`Dommy state server listening on 127.0.0.1:${activeServerPort}`);
     });
 
     httpServer.listen(listenPorts[listenIndex], "127.0.0.1");

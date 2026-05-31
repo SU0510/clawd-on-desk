@@ -29,35 +29,35 @@ const ANIMATION_OVERRIDES_EXPORT_DIALOG_STRINGS = {
     saveTitle: "Export Animation Overrides",
     openTitle: "Import Animation Overrides",
     defaultName: (ts) => `clawd-animation-overrides-${ts}.json`,
-    jsonFilter: "Clawd Animation Overrides",
+    jsonFilter: "Dommy Animation Overrides",
     nothingToExport: "No animation overrides to export. Override something first.",
   },
   zh: {
     saveTitle: "导出动画覆盖",
     openTitle: "导入动画覆盖",
     defaultName: (ts) => `clawd-animation-overrides-${ts}.json`,
-    jsonFilter: "Clawd 动画覆盖",
+    jsonFilter: "Dommy 动画覆盖",
     nothingToExport: "没有可导出的动画覆盖。先自定义几个动画试试。",
   },
   "zh-TW": {
     saveTitle: "匯出動畫與音效自訂設定",
     openTitle: "匯入動畫與音效自訂設定",
     defaultName: (ts) => `clawd-animation-overrides-${ts}.json`,
-    jsonFilter: "Clawd 動畫與音效自訂設定",
+    jsonFilter: "Dommy 動畫與音效自訂設定",
     nothingToExport: "目前沒有可匯出的自訂設定。",
   },
   ko: {
     saveTitle: "애니메이션 덮어쓰기 내보내기",
     openTitle: "애니메이션 덮어쓰기 가져오기",
     defaultName: (ts) => `clawd-animation-overrides-${ts}.json`,
-    jsonFilter: "Clawd 애니메이션 덮어쓰기",
+    jsonFilter: "Dommy 애니메이션 덮어쓰기",
     nothingToExport: "내보낼 애니메이션 덮어쓰기가 없습니다. 먼저 무언가를 덮어써 보세요.",
   },
   ja: {
     saveTitle: "アニメーション差し替えをエクスポート",
     openTitle: "アニメーション差し替えをインポート",
     defaultName: (ts) => `clawd-animation-overrides-${ts}.json`,
-    jsonFilter: "Clawd アニメーション差し替え",
+    jsonFilter: "Dommy アニメーション差し替え",
     nothingToExport: "エクスポートするアニメーション差し替えがありません。先に何かを差し替えてください。",
   },
 };
@@ -208,7 +208,7 @@ function createSettingsAnimationOverridesMain(options = {}) {
     const tasks = pendingPostReloadTasks;
     pendingPostReloadTasks = [];
     for (const task of tasks) {
-      try { task(); } catch (err) { console.warn("Clawd: post-reload task threw:", err && err.message); }
+      try { task(); } catch (err) { console.warn("Dommy: post-reload task threw:", err && err.message); }
     }
   }
 
@@ -495,9 +495,9 @@ function createSettingsAnimationOverridesMain(options = {}) {
     } catch (err) {
       const message = err && err.message;
       if (err && err.code === "ANIMATION_PREVIEW_POSTER_TIMEOUT") {
-        console.warn("Clawd: animation preview poster capture timed out:", message);
+        console.warn("Dommy: animation preview poster capture timed out:", message);
       } else {
-        console.warn("Clawd: failed to capture animation preview poster:", message);
+        console.warn("Dommy: failed to capture animation preview poster:", message);
       }
     } finally {
       if (job && job.previewPosterCacheKey) {
@@ -1221,7 +1221,7 @@ function createSettingsAnimationOverridesMain(options = {}) {
         themeCount: Object.keys(overrides).length,
       };
     } catch (err) {
-      console.warn("Clawd: export-animation-overrides failed:", err && err.message);
+      console.warn("Dommy: export-animation-overrides failed:", err && err.message);
       return { status: "error", message: (err && err.message) || "export failed" };
     }
   }
@@ -1241,7 +1241,7 @@ function createSettingsAnimationOverridesMain(options = {}) {
       }
       filePath = result.filePaths[0];
     } catch (err) {
-      console.warn("Clawd: import-animation-overrides dialog failed:", err && err.message);
+      console.warn("Dommy: import-animation-overrides dialog failed:", err && err.message);
       return { status: "error", message: (err && err.message) || "dialog failed" };
     }
 
@@ -1254,11 +1254,11 @@ function createSettingsAnimationOverridesMain(options = {}) {
     }
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { status: "error", message: "file is not a Clawd animation overrides export" };
+      return { status: "error", message: "file is not a Dommy animation overrides export" };
     }
     const magic = parsed.clawdAnimationOverrides;
     if (typeof magic !== "number") {
-      return { status: "error", message: "file is not a Clawd animation overrides export" };
+      return { status: "error", message: "file is not a Dommy animation overrides export" };
     }
 
     const commandResult = await settingsController.applyCommand("importAnimationOverrides", {

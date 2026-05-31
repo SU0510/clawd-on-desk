@@ -11,7 +11,7 @@ function checkLocalServer(serverApi) {
       status: "fail",
       level: "critical",
       detail: "Local server is not listening",
-      textHint: "Restart Clawd. If the issue persists, check ~/.pomeranian/ permissions.",
+      textHint: "Restart Dommy. If the issue persists, check ~/.pomeranian/ permissions.",
       runtime: status,
       fixAction: { type: "restart-clawd" },
     };
@@ -23,7 +23,7 @@ function checkLocalServer(serverApi) {
       status: "fail",
       level: "warning",
       detail: `Listening on 127.0.0.1:${status.port}; runtime port is ${status.runtimePort || "missing"}`,
-      textHint: "Restart Clawd to regenerate the runtime file.",
+      textHint: "Restart Dommy to regenerate the runtime file.",
       runtime: status,
       fixAction: { type: "local-server" },
     };

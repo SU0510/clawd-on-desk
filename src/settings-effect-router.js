@@ -67,19 +67,19 @@ function createSettingsEffectRouter(options = {}) {
     if ("showTray" in changes) {
       safeCall(
         logWarn,
-        "Clawd: tray toggle failed:",
+        "Dommy: tray toggle failed:",
         changes.showTray ? createTray : destroyTray
       );
     }
     if ("showDock" in changes) {
-      safeCall(logWarn, "Clawd: applyDockVisibility failed:", applyDockVisibility);
+      safeCall(logWarn, "Dommy: applyDockVisibility failed:", applyDockVisibility);
     }
     if ("lowPowerIdleMode" in changes) {
       sendToRenderer("low-power-idle-mode-change", changes.lowPowerIdleMode);
     }
     if ("lang" in changes) {
-      safeCall(logWarn, "Clawd: dashboard lang broadcast failed:", sendDashboardI18n);
-      safeCall(logWarn, "Clawd: session HUD lang broadcast failed:", sendSessionHudI18n);
+      safeCall(logWarn, "Dommy: dashboard lang broadcast failed:", sendDashboardI18n);
+      safeCall(logWarn, "Dommy: session HUD lang broadcast failed:", sendSessionHudI18n);
     }
 
     // 2. Reactive side effects.
@@ -87,14 +87,14 @@ function createSettingsEffectRouter(options = {}) {
       ("updateBubbleAutoCloseSeconds" in changes && changes.updateBubbleAutoCloseSeconds === 0) ||
       ("hideBubbles" in changes && changes.hideBubbles === true)
     ) {
-      safeCall(logWarn, "Clawd: hide update bubble failed:", hideUpdateBubbleForPolicy);
+      safeCall(logWarn, "Dommy: hide update bubble failed:", hideUpdateBubbleForPolicy);
     } else if (
       "updateBubbleAutoCloseSeconds" in changes &&
       changes.updateBubbleAutoCloseSeconds > 0
     ) {
       safeCall(
         logWarn,
-        "Clawd: refresh update bubble timer failed:",
+        "Dommy: refresh update bubble timer failed:",
         refreshUpdateBubbleAutoClose
       );
     }
@@ -107,7 +107,7 @@ function createSettingsEffectRouter(options = {}) {
       try {
         syncSessionHudVisibility();
       } catch (err) {
-        warn(logWarn, "Clawd: session HUD setting sync failed:", err);
+        warn(logWarn, "Dommy: session HUD setting sync failed:", err);
       }
     }
     if ("sessionHudCleanupDetached" in changes && changes.sessionHudCleanupDetached === true) {
@@ -115,12 +115,12 @@ function createSettingsEffectRouter(options = {}) {
         cleanStaleSessions();
         emitSessionSnapshot({ force: true });
       } catch (err) {
-        warn(logWarn, "Clawd: detached session cleanup sweep failed:", err);
+        warn(logWarn, "Dommy: detached session cleanup sweep failed:", err);
       }
     } else if ("sessionHudCleanupDetached" in changes) {
       safeCall(
         logWarn,
-        "Clawd: detached session cleanup snapshot refresh failed:",
+        "Dommy: detached session cleanup snapshot refresh failed:",
         emitSessionSnapshot,
         { force: true }
       );
@@ -128,7 +128,7 @@ function createSettingsEffectRouter(options = {}) {
     if ("allowEdgePinning" in changes) {
       safeCall(
         logWarn,
-        "Clawd: allowEdgePinning re-clamp failed:",
+        "Dommy: allowEdgePinning re-clamp failed:",
         reclampPetAfterEdgePinningChange
       );
     }
@@ -137,7 +137,7 @@ function createSettingsEffectRouter(options = {}) {
     // window position / mini state changes.
     for (const key of Object.keys(changes)) {
       if (MENU_AFFECTING_KEYS.has(key)) {
-        safeCall(logWarn, "Clawd: rebuildAllMenus failed:", rebuildAllMenus);
+        safeCall(logWarn, "Dommy: rebuildAllMenus failed:", rebuildAllMenus);
         break;
       }
     }
@@ -153,7 +153,7 @@ function createSettingsEffectRouter(options = {}) {
         }
       }
     } catch (err) {
-      warn(logWarn, "Clawd: settings-changed broadcast failed:", err);
+      warn(logWarn, "Dommy: settings-changed broadcast failed:", err);
     }
   }
 
@@ -161,7 +161,7 @@ function createSettingsEffectRouter(options = {}) {
     const nextTogglePetShortcut = (snapshot && snapshot.shortcuts && snapshot.shortcuts.togglePet) || null;
     if (nextTogglePetShortcut === lastTogglePetShortcut) return;
     lastTogglePetShortcut = nextTogglePetShortcut;
-    safeCall(logWarn, "Clawd: rebuildAllMenus failed:", rebuildAllMenus);
+    safeCall(logWarn, "Dommy: rebuildAllMenus failed:", rebuildAllMenus);
   }
 
   function start() {
