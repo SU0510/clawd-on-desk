@@ -176,7 +176,10 @@ function isPathInsideDir(baseDir, candidatePath) {
   if (!baseDir || !candidatePath) return false;
   const base = path.resolve(baseDir);
   const candidate = path.resolve(candidatePath);
-  const relative = path.relative(base, candidate);
+  const relative = path.relative(
+    process.platform === "win32" ? base.toLowerCase() : base,
+    process.platform === "win32" ? candidate.toLowerCase() : candidate
+  );
   const firstSegment = relative.split(/[\\/]/)[0];
   return relative === "" || (!!relative && firstSegment !== ".." && !path.isAbsolute(relative));
 }

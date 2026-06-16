@@ -31,444 +31,464 @@ const MINIMIZE_RESTORE_TIMEOUT = 10000; // 10s before auto-exit on minimize
 // Detection mode
 const DETECTION_TIMEOUT_MS = 5000;
 
+const _dp = require("path").join(require("os").homedir(), ".pomeranian", "dock-debug.log");
+function _dbg(...a){try{const fs=require("fs");fs.appendFileSync(_dp,new Date().toISOString().substr(11,12)+" "+a.map(x=>typeof x==="object"?JSON.stringify(x):String(x)).join(" ")+"\n")}catch{}}
 module.exports = function initDockWalk(ctx) {
-  // ── Dock state ──────────────────────────────────────────────────────────
-  let docked = false;
-  let detecting = false; // in 5s window-detection mode
-  let detectionTimer = null;
+// ── Dock state ──────────────────────────────────────────────────────────
+let docked = false;
+let detecting = false; // in 5s window-detection mode
+let detectionTimer = null;
 
-  // Target window info
-  let targetHandle = null; // platform-specific window ID/handle
-  let targetBounds = null; // { x, y, width, height }
-  let relativeX = 0.5; // pet's horizontal position as 0~1 ratio of window width
+// Target window info
+let targetHandle = null; // platform-specific window ID/handle
+let targetBounds = null; // { x, y, width, height }
+let relativeX = 0.5; // pet's horizontal position as 0~1 ratio of window width
 
-  // Dock-walk 3-state machine
-  let dockState = "lie"; // "lie" | "walk" | "happy"
-  let preHappyState = "lie"; // state before happy interrupt
-  let walkDirection = 1; // 1 = right, -1 = left
-  let lieTimer = null;
-  let walkTimer = null;
-  let walkStepTimer = null;
+// Dock-walk 3-state machine
+let dockState = "lie"; // "lie" | "walk" | "happy"
+let preHappyState = "lie"; // state before happy interrupt
+let walkDirection = 1; // 1 = right, -1 = left
+let lieTimer = null;
+let walkTimer = null;
+let walkStepTimer = null;
 
-  // Mouse proximity
-  let happyActive = false;
+// Mouse proximity
+let happyActive = false;
 
-  // Timers for window following
-  let visibilityTimer = null;
-  let posSyncTimer = null;
-  let posSyncInterval = POS_SYNC_IDLE_MS;
-  let posSyncStableCount = 0;
-  let lastSyncedBounds = null;
+// Timers for window following
+let visibilityTimer = null;
+let posSyncTimer = null;
+let posSyncInterval = POS_SYNC_IDLE_MS;
+let posSyncStableCount = 0;
+let lastSyncedBounds = null;
 
-  // Minimize restore
-  let minimizedAt = 0;
-  let minimizeTimeout = null;
+// Minimize restore
+let minimizedAt = 0;
+let minimizeTimeout = null;
 
-  // ── Getters ─────────────────────────────────────────────────────────────
-  function isDocked() { return docked; }
-  function isDetecting() { return detecting; }
-  function getDockState() { return dockState; }
+// ── Getters ─────────────────────────────────────────────────────────────
+function isDocked() { return docked; }
+function isDetecting() { return detecting; }
+function getDockState() { return dockState; }
 
-  // ── Detection mode (5s window to click a target) ────────────────────────
-  function enterDetectionMode() {
-    if (docked || detecting) return;
-    detecting = true;
-    ctx.sendToRenderer("dock-detecting", true);
-    if (ctx.sendToHitWin) ctx.sendToHitWin("hit-dock-detecting-sync", true, typeof ctx.getDetectHint === "function" ? ctx.getDetectHint() : "Click a window to dock");
+// ── Detection mode (5s window to click a target) ────────────────────────
+function enterDetectionMode() {
+ if (docked || detecting) return;
+ detecting = true;
+ ctx.sendToRenderer("dock-detecting", true);
+ if (ctx.sendToHitWin) ctx.sendToHitWin("hit-dock-detecting-sync", true, typeof ctx.getDetectHint === "function" ? ctx.getDetectHint() : "Click a window to dock");
  if (ctx.expandHitWinFullScreen) ctx.expandHitWinFullScreen();
-    detectionTimer = setTimeout(() => {
-      // Timeout — no window clicked
-      cancelDetection("timeout");
-    }, DETECTION_TIMEOUT_MS);
-  }
+ detectionTimer = setTimeout(() => {
+ // Timeout — no window clicked
+ cancelDetection("timeout");
+ }, DETECTION_TIMEOUT_MS);
+}
 
-  function cancelDetection(reason) {
-    if (!detecting) return;
-    detecting = false;
-    if (detectionTimer) { clearTimeout(detectionTimer); detectionTimer = null; }
+function cancelDetection(reason) {
+ if (!detecting) return;
+ detecting = false;
+ if (detectionTimer) { clearTimeout(detectionTimer); detectionTimer = null; }
  if (ctx.restoreHitWinSize) ctx.restoreHitWinSize();
-    ctx.sendToRenderer("dock-detecting", false);
-    if (ctx.sendToHitWin) ctx.sendToHitWin("hit-dock-detecting-sync", false);
-    if (reason === "timeout") {
-      ctx.sendToRenderer("dock-detect-cancelled");
-    }
-  }
+ ctx.sendToRenderer("dock-detecting", false);
+ if (ctx.sendToHitWin) ctx.sendToHitWin("hit-dock-detecting-sync", false);
+ if (reason === "timeout") {
+ ctx.sendToRenderer("dock-detect-cancelled");
+ }
+}
 
-  // Called when user clicks during detection mode — detect window at point
-  async function handleDetectClick(screenX, screenY) {
-    if (!detecting) return false;
-    cancelDetection("success");
+// Called when user clicks during detection mode — detect window at point
+async function handleDetectClick(screenX, screenY) {
+ if (!detecting) return false;
 
-    try {
-      const ownIds = typeof ctx.getOwnWindowIds === "function" ? ctx.getOwnWindowIds() : new Set();
-    const result = await ctx.detectWindowAtPoint(screenX, screenY, ownIds);
-      if (!result) {
-        ctx.sendToRenderer("dock-detect-cancelled");
-        return false;
-      }
+ // Manually cancel detection WITHOUT restoring hitWin size yet.
+ // We must keep hitWin full-screen (and hidden on Windows) so WindowFromPoint
+ // can see through to the target window. Restore happens in finally.
+ detecting = false;
+ if (detectionTimer) { clearTimeout(detectionTimer); detectionTimer = null; }
+ ctx.sendToRenderer("dock-detecting", false);
+ if (ctx.sendToHitWin) ctx.sendToHitWin("hit-dock-detecting-sync", false);
 
-      targetHandle = result.handle;
-      targetBounds = result.bounds;
-      relativeX = Math.max(0, Math.min(1, (screenX - result.bounds.x) / result.bounds.width));
-      dock();
-      return true;
-    } catch (err) {
-      console.warn("[dock-walk] window detection failed:", err.message);
-      ctx.sendToRenderer("dock-detect-cancelled");
-      return false;
-    }
-  }
+ // Windows: hide ALL own windows so WindowFromPoint can see through to
+ // the target. hitWin is full-screen and on top; win (pet render window)
+ // is also always-on-top and would occlude the target at the pet position.
+ const hidWindows = process.platform === "win32" && ctx.hideOwnWindows && ctx.hideOwnWindows();
 
-  // ── Dock entry ──────────────────────────────────────────────────────────
-  function dock() {
-    if (docked) return;
-    docked = true;
+ try {
+ const ownIds = typeof ctx.getOwnWindowIds === "function" ? ctx.getOwnWindowIds() : new Set();
+ _dbg("handleDetectClick: sx=" + screenX + " sy=" + screenY + " hidWin=" + hidWindows + " ownIds=" + JSON.stringify([...ownIds]));
+ const result = await ctx.detectWindowAtPoint(screenX, screenY, ownIds);
+ _dbg("detectWindowAtPoint result=" + (result ? JSON.stringify(result) : "null"));
+ if (!result) {
+ ctx.sendToRenderer("dock-detect-cancelled");
+ return false;
+ }
+
+ targetHandle = result.handle;
+ targetBounds = result.bounds;
+ relativeX = Math.max(0, Math.min(1, (screenX - result.bounds.x) / result.bounds.width));
+ dock();
+ return true;
+ } catch (err) {
+ console.warn("[dock-walk] window detection failed:", err.message);
+ ctx.sendToRenderer("dock-detect-cancelled");
+ return false;
+ } finally {
+ if (hidWindows && ctx.showOwnWindows) ctx.showOwnWindows();
+ // Restore hitWin to normal size (was left full-screen from detection mode)
  if (ctx.restoreHitWinSize) ctx.restoreHitWinSize();
-  if (ctx.setDockWalkActive) ctx.setDockWalkActive(true);
-    dockState = "lie";
-    happyActive = false;
-    walkDirection = 1;
+ }
+}
 
-    // Snap to top edge of target window
-    syncPosition();
+// ── Dock entry ──────────────────────────────────────────────────────────
+function dock() {
+ if (docked) return;
+ docked = true;
+ if (ctx.restoreHitWinSize) ctx.restoreHitWinSize();
+ if (ctx.setDockWalkActive) ctx.setDockWalkActive(true);
+ dockState = "lie";
+ happyActive = false;
+ walkDirection = 1;
 
-    // Set always-on-top to floating level
-    if (ctx.win && !ctx.win.isDestroyed()) {
-      ctx.win.setAlwaysOnTop(true, "floating");
-    }
+ // Snap to top edge of target window
+ syncPosition();
 
-    // Notify renderer
-    ctx.sendToRenderer("dock-mode-change", true);
+ // Set always-on-top to floating level
+ if (ctx.win && !ctx.win.isDestroyed()) {
+ ctx.win.setAlwaysOnTop(true, "floating");
+ }
 
-    // Start dock-walk state machine from lie
-    applyDockState("lie");
-    startLieTimer();
+ // Notify renderer
+ ctx.sendToRenderer("dock-mode-change", true);
 
-    // Start window following timers
-    startVisibilityTimer();
-    startPosSyncTimer();
-  }
+ // Start dock-walk state machine from lie
+ applyDockState("lie");
+ startLieTimer();
 
-  // ── Dock exit ───────────────────────────────────────────────────────────
-  function exitDockWalk() {
-    if (!docked) return;
-    docked = false;
-    dockState = "lie";
-    happyActive = false;
+ // Start window following timers
+ startVisibilityTimer();
+ startPosSyncTimer();
+}
 
-    // Stop all timers
-    stopLieTimer();
-    stopWalkTimer();
-    stopWalkStep();
-    stopVisibilityTimer();
-    stopPosSyncTimer();
-    if (minimizeTimeout) { clearTimeout(minimizeTimeout); minimizeTimeout = null; }
+// ── Dock exit ───────────────────────────────────────────────────────────
+function exitDockWalk() {
+ if (!docked) return;
+ docked = false;
+ dockState = "lie";
+ happyActive = false;
 
-    // Release target
-    targetHandle = null;
-    targetBounds = null;
-    lastSyncedBounds = null;
+ // Stop all timers
+ stopLieTimer();
+ stopWalkTimer();
+ stopWalkStep();
+ stopVisibilityTimer();
+ stopPosSyncTimer();
+ if (minimizeTimeout) { clearTimeout(minimizeTimeout); minimizeTimeout = null; }
 
-    // Restore normal always-on-top
-    if (ctx.win && !ctx.win.isDestroyed()) {
-      ctx.win.setAlwaysOnTop(true, "screen-saver");
-    }
+ // Release target
+ targetHandle = null;
+ targetBounds = null;
+ lastSyncedBounds = null;
 
-    // Notify renderer
-    ctx.sendToRenderer("dock-mode-change", false);
+ // Restore normal always-on-top
+ if (ctx.win && !ctx.win.isDestroyed()) {
+ ctx.win.setAlwaysOnTop(true, "screen-saver");
+ }
 
-    // Return to normal idle state
-    ctx.applyState("idle");
-  }
+ // Notify renderer
+ ctx.sendToRenderer("dock-mode-change", false);
 
-  // ── Dock-walk 3-state machine ───────────────────────────────────────────
-  function applyDockState(state) {
-    dockState = state;
-    const file = state === "happy" ? "happy.gif"
-      : state === "walk" ? "walking.gif"
-      : "front.png";
-    // Use applyState with svgOverride to force the dock-walk visual
-    ctx.applyState(state === "happy" ? "happy" : state === "walk" ? "working" : "idle", file);
+ // Return to normal idle state
+ ctx.applyState("idle");
+}
 
-    // Flip walking direction via renderer
-    if (state === "walk") {
-      ctx.sendToRenderer("dock-walk-direction", walkDirection);
-    }
-  }
+// ── Dock-walk 3-state machine ───────────────────────────────────────────
+function applyDockState(state) {
+ dockState = state;
+ const file = state === "happy" ? "happy.gif"
+ : state === "walk" ? "walking.gif"
+ : "frontwithoutbg.gif";
+ // Use applyState with svgOverride to force the dock-walk visual
+ ctx.applyState(state === "happy" ? "happy" : state === "walk" ? "working" : "idle", file);
 
-  function startLieTimer() {
-    stopLieTimer();
-    const duration = LIE_DURATION_MIN + Math.random() * LIE_DURATION_RANGE;
-    lieTimer = setTimeout(() => {
-      if (!docked || happyActive) return;
-      applyDockState("walk");
-      startWalkTimer();
-      startWalkStep();
-    }, duration);
-  }
+ // Flip walking direction via renderer
+ if (state === "walk") {
+ ctx.sendToRenderer("dock-walk-direction", walkDirection);
+ }
+}
 
-  function stopLieTimer() {
-    if (lieTimer) { clearTimeout(lieTimer); lieTimer = null; }
-  }
+function startLieTimer() {
+ stopLieTimer();
+ const duration = LIE_DURATION_MIN + Math.random() * LIE_DURATION_RANGE;
+ lieTimer = setTimeout(() => {
+ if (!docked || happyActive) return;
+ applyDockState("walk");
+ startWalkTimer();
+ startWalkStep();
+ }, duration);
+}
 
-  function startWalkTimer() {
-    stopWalkTimer();
-    const duration = WALK_DURATION_MIN + Math.random() * WALK_DURATION_RANGE;
-    walkTimer = setTimeout(() => {
-      if (!docked || happyActive) return;
-      stopWalkStep();
-      applyDockState("lie");
-      startLieTimer();
-    }, duration);
-  }
+function stopLieTimer() {
+ if (lieTimer) { clearTimeout(lieTimer); lieTimer = null; }
+}
 
-  function stopWalkTimer() {
-    if (walkTimer) { clearTimeout(walkTimer); walkTimer = null; }
-  }
+function startWalkTimer() {
+ stopWalkTimer();
+ const duration = WALK_DURATION_MIN + Math.random() * WALK_DURATION_RANGE;
+ walkTimer = setTimeout(() => {
+ if (!docked || happyActive) return;
+ stopWalkStep();
+ applyDockState("lie");
+ startLieTimer();
+ }, duration);
+}
 
-  // Walking animation step
-  function startWalkStep() {
-    stopWalkStep();
-    const step = () => {
-      if (!docked || dockState !== "walk" || happyActive) return;
-      const bounds = ctx.getPetWindowBounds();
-      const size = ctx.getCurrentPixelSize();
-      const stepPx = walkDirection * DOCK_WALK_SPEED * 16;
-      let newX = bounds.x + stepPx;
+function stopWalkTimer() {
+ if (walkTimer) { clearTimeout(walkTimer); walkTimer = null; }
+}
 
-      // Bounce at window edges
-      const winLeft = targetBounds ? targetBounds.x : 0;
-      const winRight = targetBounds ? targetBounds.x + targetBounds.width : 800;
-      if (newX <= winLeft) {
-        newX = winLeft;
-        walkDirection = 1;
-        ctx.sendToRenderer("dock-walk-direction", walkDirection);
-      } else if (newX + size.width >= winRight) {
-        newX = winRight - size.width;
-        walkDirection = -1;
-        ctx.sendToRenderer("dock-walk-direction", walkDirection);
-      }
+// Walking animation step
+function startWalkStep() {
+ stopWalkStep();
+ const step = () => {
+ if (!docked || dockState !== "walk" || happyActive) return;
+ const bounds = ctx.getPetWindowBounds();
+ const size = ctx.getCurrentPixelSize();
+ const stepPx = walkDirection * DOCK_WALK_SPEED * 16;
+ let newX = bounds.x + stepPx;
 
-      ctx.applyPetWindowPosition(newX, bounds.y);
-      ctx.syncHitWin();
-      walkStepTimer = setTimeout(step, 16);
-    };
-    walkStepTimer = setTimeout(step, 100);
-  }
+ // Bounce at window edges
+ const winLeft = targetBounds ? targetBounds.x : 0;
+ const winRight = targetBounds ? targetBounds.x + targetBounds.width : 800;
+ if (newX <= winLeft) {
+ newX = winLeft;
+ walkDirection = 1;
+ ctx.sendToRenderer("dock-walk-direction", walkDirection);
+ } else if (newX + size.width >= winRight) {
+ newX = winRight - size.width;
+ walkDirection = -1;
+ ctx.sendToRenderer("dock-walk-direction", walkDirection);
+ }
 
-  function stopWalkStep() {
-    if (walkStepTimer) { clearTimeout(walkStepTimer); walkStepTimer = null; }
-  }
+ ctx.applyPetWindowPosition(newX, bounds.y);
+ ctx.syncHitWin();
+ walkStepTimer = setTimeout(step, 16);
+ };
+ walkStepTimer = setTimeout(step, 100);
+}
 
-  // ── Mouse proximity (happy state) ───────────────────────────────────────
-  function checkProximity(cursorX, cursorY) {
-    if (!docked) return;
-    const bounds = ctx.getPetWindowBounds();
-    const petCenterX = bounds.x + bounds.width / 2;
-    const petCenterY = bounds.y + bounds.height / 2;
-    const dist = Math.sqrt((cursorX - petCenterX) ** 2 + (cursorY - petCenterY) ** 2);
+function stopWalkStep() {
+ if (walkStepTimer) { clearTimeout(walkStepTimer); walkStepTimer = null; }
+}
 
-    if (dist < HAPPY_PROXIMITY_RADIUS) {
-      if (!happyActive) {
-        triggerHappy();
-      }
-    } else {
-      if (happyActive) {
-        releaseHappy();
-      }
-    }
-  }
+// ── Mouse proximity (happy state) ───────────────────────────────────────
+function checkProximity(cursorX, cursorY) {
+ if (!docked) return;
+ const bounds = ctx.getPetWindowBounds();
+ const petCenterX = bounds.x + bounds.width / 2;
+ const petCenterY = bounds.y + bounds.height / 2;
+ const dist = Math.sqrt((cursorX - petCenterX) ** 2 + (cursorY - petCenterY) ** 2);
 
-  function triggerHappy() {
-    preHappyState = dockState;
-    happyActive = true;
-    stopLieTimer();
-    stopWalkTimer();
-    stopWalkStep();
-    applyDockState("happy");
-  }
+ if (dist < HAPPY_PROXIMITY_RADIUS) {
+ if (!happyActive) {
+ triggerHappy();
+ }
+ } else {
+ if (happyActive) {
+ releaseHappy();
+ }
+ }
+}
 
-  function releaseHappy() {
-    happyActive = false;
-    // Resume pre-interrupt state
-    if (preHappyState === "walk") {
-      applyDockState("walk");
-      startWalkTimer();
-      startWalkStep();
-    } else {
-      applyDockState("lie");
-      startLieTimer();
-    }
-  }
+function triggerHappy() {
+ preHappyState = dockState;
+ happyActive = true;
+ stopLieTimer();
+ stopWalkTimer();
+ stopWalkStep();
+ applyDockState("happy");
+}
 
-  // ── Window following — visibility timer ──────────────────────────────────
-  function startVisibilityTimer() {
-    stopVisibilityTimer();
-    const check = async () => {
-      if (!docked) return;
-      try {
-        const ownIds2 = typeof ctx.getOwnWindowIds === "function" ? ctx.getOwnWindowIds() : new Set();
-            const info = await ctx.getWindowVisibility(targetHandle, ownIds2);
-        if (!info.exists) {
-          // Window closed — auto-exit
-          exitDockWalk();
-          return;
-        }
-        if (info.minimized) {
-          if (!minimizedAt) {
-            minimizedAt = Date.now();
-            ctx.win.hide();
-            // Start restore timeout
-            minimizeTimeout = setTimeout(() => {
-              if (!docked) return;
-              exitDockWalk(); // window not restored in time
-            }, MINIMIZE_RESTORE_TIMEOUT);
-          }
-        } else {
-          if (minimizedAt) {
-            // Window restored
-            minimizedAt = 0;
-            if (minimizeTimeout) { clearTimeout(minimizeTimeout); minimizeTimeout = null; }
-            ctx.win.show();
-            syncPosition();
-          }
-          if (info.occluded) {
-            ctx.win.hide();
-          } else {
-            if (!ctx.win.isVisible()) {
-              ctx.win.show();
-            }
-          }
-        }
-      } catch (err) {
-        // If visibility check fails (e.g., handle invalidated), exit
-        console.warn("[dock-walk] visibility check failed:", err.message);
-      }
-      if (docked) {
-        visibilityTimer = setTimeout(check, VISIBILITY_CHECK_MS);
-      }
-    };
-    visibilityTimer = setTimeout(check, VISIBILITY_CHECK_MS);
-  }
+function releaseHappy() {
+ happyActive = false;
+ // Resume pre-interrupt state
+ if (preHappyState === "walk") {
+ applyDockState("walk");
+ startWalkTimer();
+ startWalkStep();
+ } else {
+ applyDockState("lie");
+ startLieTimer();
+ }
+}
 
-  function stopVisibilityTimer() {
-    if (visibilityTimer) { clearTimeout(visibilityTimer); visibilityTimer = null; }
-  }
+// ── Window following — visibility timer ──────────────────────────────────
+function startVisibilityTimer() {
+ stopVisibilityTimer();
+ const check = async () => {
+ if (!docked) return;
+ try {
+ const ownIds2 = typeof ctx.getOwnWindowIds === "function" ? ctx.getOwnWindowIds() : new Set();
+ const info = await ctx.getWindowVisibility(targetHandle, ownIds2);
+ if (!info.exists) {
+ // Window closed — auto-exit
+ exitDockWalk();
+ return;
+ }
+ if (info.minimized) {
+ if (!minimizedAt) {
+ minimizedAt = Date.now();
+ ctx.win.hide();
+ // Start restore timeout
+ minimizeTimeout = setTimeout(() => {
+ if (!docked) return;
+ exitDockWalk(); // window not restored in time
+ }, MINIMIZE_RESTORE_TIMEOUT);
+ }
+ } else {
+ if (minimizedAt) {
+ // Window restored
+ minimizedAt = 0;
+ if (minimizeTimeout) { clearTimeout(minimizeTimeout); minimizeTimeout = null; }
+ ctx.win.show();
+ syncPosition();
+ }
+ if (info.occluded) {
+ ctx.win.hide();
+ } else {
+ if (!ctx.win.isVisible()) {
+ ctx.win.show();
+ }
+ }
+ }
+ } catch (err) {
+ // If visibility check fails (e.g., handle invalidated), exit
+ console.warn("[dock-walk] visibility check failed:", err.message);
+ }
+ if (docked) {
+ visibilityTimer = setTimeout(check, VISIBILITY_CHECK_MS);
+ }
+ };
+ visibilityTimer = setTimeout(check, VISIBILITY_CHECK_MS);
+}
 
-  // ── Window following — position sync timer ──────────────────────────────
-  function startPosSyncTimer() {
-    stopPosSyncTimer();
-    posSyncInterval = POS_SYNC_IDLE_MS;
-    posSyncStableCount = 0;
+function stopVisibilityTimer() {
+ if (visibilityTimer) { clearTimeout(visibilityTimer); visibilityTimer = null; }
+}
 
-    const sync = async () => {
-      if (!docked) return;
-      try {
-        const newBounds = await ctx.getWindowBounds(targetHandle);
-        if (!newBounds) {
-          // Window gone
-          exitDockWalk();
-          return;
-        }
+// ── Window following — position sync timer ──────────────────────────────
+function startPosSyncTimer() {
+ stopPosSyncTimer();
+ posSyncInterval = POS_SYNC_IDLE_MS;
+ posSyncStableCount = 0;
 
-        if (!lastSyncedBounds || boundsEqual(newBounds, lastSyncedBounds)) {
-          posSyncStableCount++;
-          if (posSyncStableCount >= POS_SYNC_STABLE_COUNT && posSyncInterval === POS_SYNC_ACTIVE_MS) {
-            // Drag ended — sync position
-            targetBounds = newBounds;
-            syncPosition();
-            posSyncInterval = POS_SYNC_IDLE_MS;
-          }
-        } else {
-          // Bounds changing — window is being dragged
-          posSyncStableCount = 0;
-          posSyncInterval = POS_SYNC_ACTIVE_MS;
-          targetBounds = newBounds;
-        }
-        lastSyncedBounds = { ...newBounds };
-      } catch (err) {
-        console.warn("[dock-walk] position sync failed:", err.message);
-      }
-      if (docked) {
-        posSyncTimer = setTimeout(sync, posSyncInterval);
-      }
-    };
-    posSyncTimer = setTimeout(sync, posSyncInterval);
-  }
+ const sync = async () => {
+ if (!docked) return;
+ try {
+ const newBounds = await ctx.getWindowBounds(targetHandle);
+ if (!newBounds) {
+ // Window gone
+ exitDockWalk();
+ return;
+ }
 
-  function stopPosSyncTimer() {
-    if (posSyncTimer) { clearTimeout(posSyncTimer); posSyncTimer = null; }
-  }
+ if (!lastSyncedBounds || boundsEqual(newBounds, lastSyncedBounds)) {
+ posSyncStableCount++;
+ if (posSyncStableCount >= POS_SYNC_STABLE_COUNT && posSyncInterval === POS_SYNC_ACTIVE_MS) {
+ // Drag ended — sync position
+ targetBounds = newBounds;
+ syncPosition();
+ posSyncInterval = POS_SYNC_IDLE_MS;
+ }
+ } else {
+ // Bounds changing — window is being dragged
+ posSyncStableCount = 0;
+ posSyncInterval = POS_SYNC_ACTIVE_MS;
+ targetBounds = newBounds;
+ }
+ lastSyncedBounds = { ...newBounds };
+ } catch (err) {
+ console.warn("[dock-walk] position sync failed:", err.message);
+ }
+ if (docked) {
+ posSyncTimer = setTimeout(sync, posSyncInterval);
+ }
+ };
+ posSyncTimer = setTimeout(sync, posSyncInterval);
+}
 
-  function boundsEqual(a, b) {
-    if (!a || !b) return false;
-    return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-  }
+function stopPosSyncTimer() {
+ if (posSyncTimer) { clearTimeout(posSyncTimer); posSyncTimer = null; }
+}
 
-  // ── Position sync using relativeX ───────────────────────────────────────
+function boundsEqual(a, b) {
+ if (!a || !b) return false;
+ return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+// ── Position sync using relativeX ───────────────────────────────────────
 // DOCK_LIE_WALK_Y_OFFSET: shift the pet lower for lie/walk states so it
 // visually overlaps the window edge more (paws on the sill). Happy keeps
 // the original edge-aligned position.
 const DOCK_LIE_WALK_Y_OFFSET = 20;
 
-  function syncPosition() {
-    if (!docked || !targetBounds) return;
-    const size = ctx.getCurrentPixelSize();
-    const newPetX = targetBounds.x + targetBounds.width * relativeX - size.width / 2;
-  const yOffset = (dockState === "lie" || dockState === "walk") ? DOCK_LIE_WALK_Y_OFFSET : 0;
-  const newPetY = targetBounds.y - size.height + yOffset;
+function syncPosition() {
+ if (!docked || !targetBounds) return;
+ const size = ctx.getCurrentPixelSize();
+ const newPetX = targetBounds.x + targetBounds.width * relativeX - size.width / 2;
+ const yOffset = (dockState === "lie" || dockState === "walk") ? DOCK_LIE_WALK_Y_OFFSET : 0;
+ const newPetY = targetBounds.y - size.height + yOffset;
 
-    // Clamp within window bounds
-    const clampedX = Math.max(
-      targetBounds.x,
-      Math.min(newPetX, targetBounds.x + targetBounds.width - size.width)
-    );
+ // Clamp within window bounds
+ const clampedX = Math.max(
+ targetBounds.x,
+ Math.min(newPetX, targetBounds.x + targetBounds.width - size.width)
+ );
 
-    ctx.applyPetWindowPosition(clampedX, newPetY);
-    ctx.syncHitWin();
+ ctx.applyPetWindowPosition(clampedX, newPetY);
+ ctx.syncHitWin();
 
-    // Update relativeX after clamping
-    relativeX = (clampedX + size.width / 2 - targetBounds.x) / targetBounds.width;
-  }
+ // Update relativeX after clamping
+ relativeX = (clampedX + size.width / 2 - targetBounds.x) / targetBounds.width;
+}
 
-  // ── Drag exit check ─────────────────────────────────────────────────────
-  function checkDockDragExit() {
-    if (!docked) return false;
-    const bounds = ctx.getPetWindowBounds();
-    if (!targetBounds) return false;
-    // Exit if dragged more than DOCK_EXIT_TOLERANCE below the target window edge
-    const windowBottom = bounds.y + bounds.height;
-    const edgeY = targetBounds.y;
-    if (windowBottom - edgeY > DOCK_EXIT_TOLERANCE + bounds.height) {
-      exitDockWalk();
-      return true;
-    }
-    return false;
-  }
+// ── Drag exit check ─────────────────────────────────────────────────────
+function checkDockDragExit() {
+ if (!docked) return false;
+ const bounds = ctx.getPetWindowBounds();
+ if (!targetBounds) return false;
+ // Exit if dragged more than DOCK_EXIT_TOLERANCE below the target window edge
+ const windowBottom = bounds.y + bounds.height;
+ const edgeY = targetBounds.y;
+ if (windowBottom - edgeY > DOCK_EXIT_TOLERANCE + bounds.height) {
+ exitDockWalk();
+ return true;
+ }
+ return false;
+}
 
-  // ── Theme switch handler ────────────────────────────────────────────────
-  function handleThemeSwitch() {
-    if (docked) exitDockWalk();
-    if (detecting) cancelDetection("theme-switch");
-  }
+// ── Theme switch handler ────────────────────────────────────────────────
+function handleThemeSwitch() {
+ if (docked) exitDockWalk();
+ if (detecting) cancelDetection("theme-switch");
+}
 
-  // ── Cleanup ─────────────────────────────────────────────────────────────
-  function cleanup() {
-    if (docked) exitDockWalk();
-    if (detecting) cancelDetection("cleanup");
-  }
+// ── Cleanup ─────────────────────────────────────────────────────────────
+function cleanup() {
+ if (docked) exitDockWalk();
+ if (detecting) cancelDetection("cleanup");
+}
 
-  return {
-    isDocked,
-    isDetecting,
-    getDockState,
-    enterDetectionMode,
-    handleDetectClick,
-    exitDockWalk,
-    checkProximity,
-    checkDockDragExit,
-    handleThemeSwitch,
-    syncPosition,
-    cleanup,
-  };
+return {
+ isDocked,
+ isDetecting,
+ getDockState,
+ enterDetectionMode,
+ handleDetectClick,
+ exitDockWalk,
+ checkProximity,
+ checkDockDragExit,
+ handleThemeSwitch,
+ syncPosition,
+ cleanup,
+};
 };

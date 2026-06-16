@@ -8,7 +8,7 @@ const {
   getPortCandidates,
   readRuntimePort,
   writeRuntimeConfig,
-} = require("../hooks/server-config");
+} = require("./server-config");
 
 const CLAWD_SERVER_ID = "pomeranian-on-desk";
 

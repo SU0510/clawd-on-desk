@@ -86,11 +86,11 @@ describe("dock-walk state machine", () => {
   it("applies lie state when docking", async () => {
     dw.enterDetectionMode();
     await dw.handleDetectClick(100, 200);
-    // First applyState should be idle with front.png
+    // First applyState should be idle with frontwithoutbg.gif
     assert.ok(applied.length > 0);
     const firstApply = applied[0];
     assert.strictEqual(firstApply.state, "idle");
-    assert.strictEqual(firstApply.svg, "front.png");
+    assert.strictEqual(firstApply.svg, "frontwithoutbg.gif");
   });
 
   it("exits dock-walk mode", async () => {

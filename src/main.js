@@ -1449,7 +1449,12 @@ const _dockWalk = createDockWalk({
   syncHitWin,
   sendToRenderer,
   sendToHitWin,
-  detectWindowAtPoint: dockWalkDetect.detectWindowAtPoint,
+  detectWindowAtPoint: (sx, sy, ownIds) => {
+    const sf = screen.getPrimaryDisplay().scaleFactor;
+    const _dp = require("path").join(require("os").homedir(), ".pomeranian", "dock-debug.log");
+    try { require("fs").appendFileSync(_dp, new Date().toISOString().substr(11,12) + " main-detect: sx=" + sx + " sy=" + sy + " sf=" + sf + "\n"); } catch {}
+    return dockWalkDetect.detectWindowAtPoint(sx, sy, ownIds, sf);
+  },
   getWindowBounds: dockWalkDetect.getWindowBounds,
   getWindowVisibility: dockWalkDetect.getWindowVisibility,
   setDockWalkActive: (v) => _state.setDockWalkActive(v),
@@ -1459,9 +1464,15 @@ const _dockWalk = createDockWalk({
       try {
         const handle = bw.getNativeWindowHandle();
         if (handle && handle.length >= 8) {
-          // On Windows, HWND is the first pointer-sized value
-          // On macOS, this is an NSView pointer (PID-based filtering is used instead)
-          ids.add(handle.readUInt32LE(0));
+          if (process.platform === "win32") {
+            // Windows: HWND is a 64-bit pointer; read full value to match koffi uintptr_t
+            const lo = handle.readUInt32LE(0);
+            const hi = handle.readUInt32LE(4);
+            ids.add(hi * 0x100000000 + lo);
+          } else {
+            // macOS: NSView pointer — only lower 32 bits needed for PID-based filtering
+            ids.add(handle.readUInt32LE(0));
+          }
         }
       } catch (_) {}
     }
@@ -1477,6 +1488,27 @@ const _dockWalk = createDockWalk({
   },
   restoreHitWinSize: () => {
     petWindowRuntime.syncHitWin();
+  },
+  hideOwnWindows: () => {
+    let hid = false;
+    if (hitWin && !hitWin.isDestroyed() && hitWin.isVisible()) {
+      hitWin.hide();
+      hid = true;
+    }
+    if (win && !win.isDestroyed() && win.isVisible()) {
+      win.hide();
+      hid = true;
+    }
+    return hid;
+  },
+  showOwnWindows: () => {
+    if (win && !win.isDestroyed()) {
+      win.show();
+    }
+    if (hitWin && !hitWin.isDestroyed()) {
+      hitWin.showInactive();
+      keepOutOfTaskbar(hitWin);
+    }
   },
   getDetectHint: () => translate("dockDetectHint"),
 });
@@ -1511,7 +1543,7 @@ if (!gotTheLock) {
     if (shouldOpenSettingsWindowFromArgv(commandLine)) {
       settingsWindowRuntime.openWhenReady();
     }
-    reapplyMacVisibility();
+    reapplyMacVisibility(); reassertWinTopmost();
   });
 
   // macOS: hide dock icon early if user previously disabled it

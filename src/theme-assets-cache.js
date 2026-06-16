@@ -18,7 +18,10 @@ function isPathInsideDir(baseDir, candidatePath) {
   if (!baseDir || !candidatePath) return false;
   const base = path.resolve(baseDir);
   const candidate = path.resolve(candidatePath);
-  const relative = path.relative(base, candidate);
+  const relative = path.relative(
+    process.platform === "win32" ? base.toLowerCase() : base,
+    process.platform === "win32" ? candidate.toLowerCase() : candidate
+  );
   const firstSegment = relative.split(/[\\/]/)[0];
   return relative === "" || (!!relative && firstSegment !== ".." && !path.isAbsolute(relative));
 }
@@ -70,7 +73,13 @@ function copyRasterToCache(sourceAbs, destAbs, stat) {
     if (!tmpStat.isFile() || tmpStat.size !== stat.size) {
       throw new Error("copied raster size mismatch");
     }
-    fs.renameSync(tmp, destAbs);
+    try {
+      fs.renameSync(tmp, destAbs);
+    } catch (renameErr) {
+      if (process.platform !== "win32") throw renameErr;
+      fs.copyFileSync(tmp, destAbs);
+      try { fs.unlinkSync(tmp); } catch {}
+    }
   } catch (e) {
     try { fs.rmSync(tmp, { force: true }); } catch {}
     throw e;

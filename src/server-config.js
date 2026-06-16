@@ -53,7 +53,13 @@ function writeRuntimeConfig(port) {
   fs.mkdirSync(dir, { recursive: true });
   try {
     fs.writeFileSync(tmpPath, body, "utf8");
-    fs.renameSync(tmpPath, RUNTIME_CONFIG_PATH);
+    try {
+      fs.renameSync(tmpPath, RUNTIME_CONFIG_PATH);
+    } catch (renameErr) {
+      if (process.platform !== "win32") throw renameErr;
+      fs.copyFileSync(tmpPath, RUNTIME_CONFIG_PATH);
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
     return true;
   } catch {
     try { fs.unlinkSync(tmpPath); } catch {}

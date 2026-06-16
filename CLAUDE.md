@@ -82,6 +82,7 @@ Each agent: config file in `agents/` (id, name, processNames, eventMap, capabili
 - **Codex official hooks** are primary; JSONL polling is fallback for uncovered events (WebSearch, compaction, abort) and history compat.
 - **opencode permissions** cannot use `permission.ask` hook; use event hook + reverse bridge instead.
 - **Kiro** has no global hooks — injected into `~/.kiro/agents/*.json` only.
+- **`clawd-on-desk-source-code/`** is the original project source kept for reference/comparison only. Do NOT modify any files inside it.
 - **Resource paths**: Always use `path.join(__dirname, ...)`.
 - **Assets**: Edit published assets by copying to `assets/source/` first. Do not delete `assets/source/cloudling-pointer-bridge/` (reserved source directory).
 - **Windows NSIS**: Must produce architecture-specific x64/ARM64 installers; `buildUniversalInstaller` stays `false`.
@@ -101,3 +102,9 @@ Each agent: config file in `agents/` (id, name, processNames, eventMap, capabili
 ## Deep docs
 
 See `docs/project/` for architecture details: `project-introduction.md`, `agent-runtime-architecture.md`, `project-architecture.md`, `theme-state-ui.md`, `release-process.md`.
+
+
+## File Writing Rule
+
+- Never write large amounts of content to a file in a single operation.Large single-write operations may fail due to tool limitations.
+- Always split large writes into smaller chunks and append incrementally.For generated code, documents, or configuration files, write section-by-section instead of one huge write.

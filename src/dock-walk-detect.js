@@ -9,7 +9,8 @@
 // - Linux: xdotool + xwininfo via child_process
 
 const { execFile } = require("child_process");
-
+const _dp = require("path").join(require("os").homedir(), ".pomeranian", "dock-debug.log");
+function _dbg(...a){try{const fs=require("fs");fs.appendFileSync(_dp,new Date().toISOString().substr(11,12)+" "+a.map(x=>typeof x==="object"?JSON.stringify(x):String(x)).join(" ")+"\n")}catch{}}
 const isMac = process.platform === "darwin";
 const isWin = process.platform === "win32";
 const isLinux = process.platform === "linux";
@@ -298,15 +299,15 @@ function initWinUser32() {
 		const POINT = koffi.struct("POINT", { x: "long", y: "long" });
 		const RECT = koffi.struct("RECT", { left: "long", top: "long", right: "long", bottom: "long" });
 
-		const WindowFromPoint = user32.func("WindowFromPoint", "void *", [POINT]);
-		const GetWindowRect = user32.func("GetWindowRect", "bool", ["void *", RECT]);
-		const GetForegroundWindow = user32.func("GetForegroundWindow", "void *", []);
-		const IsWindow = user32.func("IsWindow", "bool", ["void *"]);
-		const IsIconic = user32.func("IsIconic", "bool", ["void *"]);
-		const GetAncestor = user32.func("GetAncestor", "void *", ["void *", "uint"]);
-		const GetCurrentProcessId = user32.func("GetCurrentProcessId", "uint", []);
+		const WindowFromPoint = user32.func("WindowFromPoint", "uintptr_t", [POINT]);
+		const RECTPtr = koffi.pointer(RECT);
+		const GetWindowRect = user32.func("GetWindowRect", "bool", ["uintptr_t", RECTPtr]);
+		const GetForegroundWindow = user32.func("GetForegroundWindow", "uintptr_t", []);
+		const IsWindow = user32.func("IsWindow", "bool", ["uintptr_t"]);
+		const IsIconic = user32.func("IsIconic", "bool", ["uintptr_t"]);
+		const GetAncestor = user32.func("GetAncestor", "uintptr_t", ["uintptr_t", "uint"]);
 
-		winUser32 = { WindowFromPoint, GetWindowRect, GetForegroundWindow, IsWindow, IsIconic, GetAncestor, GetCurrentProcessId, POINT, RECT };
+		winUser32 = { WindowFromPoint, GetWindowRect, GetForegroundWindow, IsWindow, IsIconic, GetAncestor, POINT, RECT, koffi };
 		return winUser32;
 	} catch (err) {
 		console.warn("[dock-walk-detect] Windows user32 init failed:", err.message);
@@ -314,29 +315,37 @@ function initWinUser32() {
 	}
 }
 
-function winGetWindowAtPoint(screenX, screenY, ownHwnds) {
+function winGetWindowAtPoint(screenX, screenY, ownHwnds, scaleFactor) {
 	const u32 = initWinUser32();
-	if (!u32) return null;
+	if (!u32) { _dbg("winGetWindowAtPoint: initWinUser32 FAILED"); return null; }
 
 	try {
-		const pt = { x: screenX, y: screenY };
+		// WindowFromPoint expects physical pixels; screenX/Y are DIP (logical)
+		const sf = typeof scaleFactor === "number" && scaleFactor > 0 ? scaleFactor : 1;
+		const pt = { x: Math.round(screenX * sf), y: Math.round(screenY * sf) };
+		_dbg("WFP: dip=" + screenX + "," + screenY + " sf=" + sf + " phys=" + pt.x + "," + pt.y);
 		let hwnd = u32.WindowFromPoint(pt);
+		_dbg("WindowFromPoint => " + hwnd + " type=" + typeof hwnd);
+
+		if (!hwnd) return null;
 
 		// Walk up to top-level window
 		const GA_ROOT = 2;
 		hwnd = u32.GetAncestor(hwnd, GA_ROOT);
+		_dbg("GetAncestor(ROOT) => " + hwnd);
 
 		if (!hwnd) return null;
 
-		// Skip own windows by PID (GetWindowThreadProcessId)
-		const winPid = u32.GetWindowThreadProcessId ? 0 : 0; // fallback to ownHwnds
-		if (ownHwnds && ownHwnds.has(Number(hwnd))) return null;
+		const isOwn = ownHwnds && ownHwnds.has(hwnd);
+		_dbg("isOwn=" + isOwn + " hwnd=" + hwnd + " ownHwnds=" + JSON.stringify([...(ownHwnds||[])]));
+		if (isOwn) return null;
 
-		const rect = new u32.RECT();
-		if (!u32.GetWindowRect(hwnd, rect)) return null;
+		const rectBuf = u32.koffi.alloc(u32.RECT, 1);
+		if (!u32.GetWindowRect(hwnd, rectBuf)) return null;
+		const rect = u32.koffi.decode(rectBuf, 0, u32.RECT);
 
 		return {
-			handle: Number(hwnd),
+			handle: hwnd,
 			bounds: {
 				x: rect.left,
 				y: rect.top,
@@ -345,7 +354,7 @@ function winGetWindowAtPoint(screenX, screenY, ownHwnds) {
 			},
 		};
 	} catch (err) {
-		console.warn("[dock-walk-detect] Windows window detection failed:", err.message);
+		_dbg("EXCEPTION: " + err.message);
 		return null;
 	}
 }
@@ -356,8 +365,9 @@ function winGetWindowBounds(hwnd) {
 
 	try {
 		if (!u32.IsWindow(hwnd)) return null;
-		const rect = new u32.RECT();
-		if (!u32.GetWindowRect(hwnd, rect)) return null;
+		const rectBuf = u32.koffi.alloc(u32.RECT, 1);
+		if (!u32.GetWindowRect(hwnd, rectBuf)) return null;
+		const rect = u32.koffi.decode(rectBuf, 0, u32.RECT);
 		return {
 			x: rect.left, y: rect.top,
 			width: rect.right - rect.left,
@@ -381,15 +391,17 @@ function winGetWindowVisibility(hwnd, ownHwnds) {
 		if (fgHwnd === hwnd) return { exists: true, minimized: false, occluded: false };
 
 		// Skip own process windows in occlusion check
-		if (ownHwnds && ownHwnds.has(Number(fgHwnd))) {
+		if (ownHwnds && ownHwnds.has(fgHwnd)) {
 			return { exists: true, minimized: false, occluded: false };
 		}
 
 		// Check if foreground window overlaps our target
-		const fgRect = new u32.RECT();
-		const targetRect = new u32.RECT();
-		u32.GetWindowRect(fgHwnd, fgRect);
-		u32.GetWindowRect(hwnd, targetRect);
+		const fgBuf = u32.koffi.alloc(u32.RECT, 1);
+		const tgtBuf = u32.koffi.alloc(u32.RECT, 1);
+		u32.GetWindowRect(fgHwnd, fgBuf);
+		u32.GetWindowRect(hwnd, tgtBuf);
+		const fgRect = u32.koffi.decode(fgBuf, 0, u32.RECT);
+		const targetRect = u32.koffi.decode(tgtBuf, 0, u32.RECT);
 
 		const fgBounds = { x: fgRect.left, y: fgRect.top, width: fgRect.right - fgRect.left, height: fgRect.bottom - fgRect.top };
 		const tgtBounds = { x: targetRect.left, y: targetRect.top, width: targetRect.right - targetRect.left, height: targetRect.bottom - targetRect.top };
@@ -470,12 +482,12 @@ function linuxGetWindowVisibility(windowId, ownWindowIds) {
 // ── Unified API ───────────────────────────────────────────────────────────
 // All async for consistency (macOS/Windows are sync but wrapped in Promise)
 
-function detectWindowAtPoint(screenX, screenY, ownWindowIds) {
+function detectWindowAtPoint(screenX, screenY, ownWindowIds, scaleFactor) {
 	if (isMac) {
 		return Promise.resolve(macGetWindowAtPoint(screenX, screenY, ownWindowIds || new Set()));
 	}
 	if (isWin) {
-		return Promise.resolve(winGetWindowAtPoint(screenX, screenY, ownWindowIds || new Set()));
+		return Promise.resolve(winGetWindowAtPoint(screenX, screenY, ownWindowIds || new Set(), scaleFactor));
 	}
 	if (isLinux) {
 		return linuxGetWindowAtPoint(screenX, screenY, ownWindowIds || new Set());

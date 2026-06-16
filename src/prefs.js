@@ -85,7 +85,7 @@ const SCHEMA = {
     normalize: normalizeShortcuts,
   },
   // Theme
-  theme: { type: "string", default: "clawd" },
+  theme: { type: "string", default: "pomeranian" },
   themeOverrides: {
     type: "object",
     defaultFactory: () => ({}),
