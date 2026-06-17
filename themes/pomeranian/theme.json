@@ -10,18 +10,18 @@
     "states": []
   },
   "states": {
-    "idle": ["front.png"],
-    "working": ["front.png"],
-    "thinking": ["front.png"],
+    "idle": ["frontwithoutbg.gif"],
+    "working": ["frontwithoutbg.gif"],
+    "thinking": ["frontwithoutbg.gif"],
     "happy": ["happy.gif"],
-    "sleeping": { "files": ["front.png"], "fallbackTo": "idle" },
-    "dozing": { "files": ["front.png"], "fallbackTo": "idle" },
-    "collapsing": { "files": ["front.png"], "fallbackTo": "idle" },
-    "yawning": { "files": ["front.png"], "fallbackTo": "idle" },
-    "waking": { "files": ["front.png"], "fallbackTo": "idle" },
+    "sleeping": { "files": ["frontwithoutbg.gif"], "fallbackTo": "idle" },
+    "dozing": { "files": ["frontwithoutbg.gif"], "fallbackTo": "idle" },
+    "collapsing": { "files": ["frontwithoutbg.gif"], "fallbackTo": "idle" },
+    "yawning": { "files": ["frontwithoutbg.gif"], "fallbackTo": "idle" },
+    "waking": { "files": ["frontwithoutbg.gif"], "fallbackTo": "idle" },
     "attention": { "files": ["happy.gif"], "fallbackTo": "happy" },
     "notification": { "files": ["happy.gif"], "fallbackTo": "happy" },
-    "error": { "files": ["front.png"], "fallbackTo": "idle" },
+    "error": { "files": ["frontwithoutbg.gif"], "fallbackTo": "idle" },
     "sweeping": { "files": ["walking.gif"], "fallbackTo": "working" },
     "carrying": { "files": ["walking.gif"], "fallbackTo": "working" },
     "juggling": { "files": ["walking.gif"], "fallbackTo": "working" }
@@ -35,7 +35,7 @@
     "offsetX": -0.45,
     "offsetY": -0.25,
     "fileScales": {
-      "front.png": 0.75,
+      "frontwithoutbg.gif": 0.75,
       "walking.gif": 0.85,
       "happy.gif": 0.70,
       "side.png": 0.9
@@ -73,6 +73,6 @@
     "walking.gif"
   ],
   "sleepingHitboxFiles": [
-    "front.png"
+    "frontwithoutbg.gif"
   ]
 }

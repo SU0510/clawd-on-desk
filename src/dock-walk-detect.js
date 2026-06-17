@@ -209,23 +209,25 @@ function macGetWindowVisibility(windowId, ownWindowIds) {
 		const count = cg.CFArrayGetCount(windowList);
 		const numBuf = koffi.alloc("int64", 1);
 
+		// Two-pass: first find the target's layer, then collect occluders.
+		// A single-pass with targetLayer initialized to 0 falsely counts all
+		// layer>=0 windows above the target as occluders — the menu bar at
+		// layer 25 (which always overlaps normal app window bounds) would
+		// trigger a false occluded=true every 500ms, causing the pet to hide.
 		let targetFound = false;
 		let targetBounds = null;
 		let targetLayer = 0;
-
-		// Build z-order list of windows that could occlude our target
-		const aboveWindows = [];
+		let windowCount = 0;
+		const entries = [];
 
 		for (let i = 0; i < count; i++) {
 			const entry = cg.CFArrayGetValueAtIndex(windowList, i);
-
 			const numberRef = cg.CFDictionaryGetValue(entry, kCGWindowNumber);
 			if (!numberRef) continue;
 			koffi.encode(numBuf, 0, "int64", 0n);
 			cg.CFNumberGetValue(numberRef, cg.kCFNumberSInt64Type, numBuf);
 			const id = Number(koffi.decode(numBuf, 0, "int64"));
 
-			// Read PID for own-window filtering in occlusion check
 			const pidRef = cg.CFDictionaryGetValue(entry, kCGWindowOwnerPID);
 			let entryPid = 0;
 			if (pidRef) {
@@ -234,34 +236,44 @@ function macGetWindowVisibility(windowId, ownWindowIds) {
 				entryPid = Number(koffi.decode(numBuf, 0, "int64"));
 			}
 
+			const layerRef = cg.CFDictionaryGetValue(entry, kCGWindowLayer);
+			let layer = 0;
+			if (layerRef) {
+				koffi.encode(numBuf, 0, "int64", 0n);
+				cg.CFNumberGetValue(layerRef, cg.kCFNumberSInt64Type, numBuf);
+				layer = Number(koffi.decode(numBuf, 0, "int64"));
+			}
+
+			const boundsRef = cg.CFDictionaryGetValue(entry, kCGWindowBounds);
+			let bounds = null;
+			if (boundsRef) bounds = macReadBoundsDict(cg, koffi, boundsRef, numBuf);
+
 			if (id === windowId) {
 				targetFound = true;
-				const boundsRef = cg.CFDictionaryGetValue(entry, kCGWindowBounds);
-				if (boundsRef) targetBounds = macReadBoundsDict(cg, koffi, boundsRef, numBuf);
-				const layerRef = cg.CFDictionaryGetValue(entry, kCGWindowLayer);
-				if (layerRef) {
-					koffi.encode(numBuf, 0, "int64", 0n);
-					cg.CFNumberGetValue(layerRef, cg.kCFNumberSInt64Type, numBuf);
-					targetLayer = Number(koffi.decode(numBuf, 0, "int64"));
-				}
-			} else if (!targetFound && entryPid !== ownPid && !(ownWindowIds && ownWindowIds.has(id))) {
-				// Window above target in z-order — check if it could occlude
-				const layerRef = cg.CFDictionaryGetValue(entry, kCGWindowLayer);
-				let layer = 0;
-				if (layerRef) {
-					koffi.encode(numBuf, 0, "int64", 0n);
-					cg.CFNumberGetValue(layerRef, cg.kCFNumberSInt64Type, numBuf);
-					layer = Number(koffi.decode(numBuf, 0, "int64"));
-				}
-				const boundsRef = cg.CFDictionaryGetValue(entry, kCGWindowBounds);
-				if (boundsRef && layer >= targetLayer) {
-					const bounds = macReadBoundsDict(cg, koffi, boundsRef, numBuf);
-					if (bounds) aboveWindows.push(bounds);
-				}
+				targetBounds = bounds;
+				targetLayer = layer;
 			}
+
+			entries.push({ id, pid: entryPid, layer, bounds });
+			windowCount++;
 		}
 
 		if (!targetFound) return { exists: false, minimized: false, occluded: false };
+
+		// Second pass: collect windows above the target in z-order that could occlude
+		const aboveWindows = [];
+		let seenTarget = false;
+		for (let i = 0; i < windowCount; i++) {
+			const e = entries[i];
+			if (e.id === windowId) { seenTarget = true; continue; }
+			if (seenTarget) break; // past target in z-order — stop
+			if (e.pid === ownPid || (ownWindowIds && ownWindowIds.has(e.id))) continue;
+			// Skip system-level windows (menu bar, cursor, screen-saver, etc.)
+			if (e.layer > 3) continue;
+			if (e.layer >= targetLayer && e.bounds) {
+				aboveWindows.push(e.bounds);
+			}
+		}
 
 		// Check occlusion: any window above overlaps our target bounds
 		let occluded = false;

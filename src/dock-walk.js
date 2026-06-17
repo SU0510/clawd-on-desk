@@ -169,6 +169,9 @@ module.exports = function initDockWalk(ctx) {
     targetBounds = null;
     lastSyncedBounds = null;
 
+    // Clear dock-walk flag so state.js stops blocking normal state transitions
+    if (ctx.setDockWalkActive) ctx.setDockWalkActive(false);
+
     // Restore normal always-on-top
     if (ctx.win && !ctx.win.isDestroyed()) {
       ctx.win.setAlwaysOnTop(true, "screen-saver");
@@ -186,7 +189,7 @@ module.exports = function initDockWalk(ctx) {
     dockState = state;
     const file = state === "happy" ? "happy.gif"
       : state === "walk" ? "walking.gif"
-      : "front.png";
+      : "frontwithoutbg.gif";
     // Use applyState with svgOverride to force the dock-walk visual
     ctx.applyState(state === "happy" ? "happy" : state === "walk" ? "working" : "idle", file);
 
